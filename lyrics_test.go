@@ -12,6 +12,26 @@ import (
 	"time"
 )
 
+func TestEnhancedLyricsVoiceMarkers(t *testing.T) {
+	for _, prefix := range []string{"v1:", "v2: ", "[v1]", "<v1>", "<00:01.00>v1: ", "[v12:]"} {
+		d := parseLyrics("[00:01.00]" + prefix + "<00:01.00>Hello <00:01.50>world")
+		if !d.WordTimed || d.Lines[0].Text != "Hello world" {
+			t.Fatalf("%q: %+v", prefix, d)
+		}
+		var words string
+		for _, word := range d.Lines[0].Words {
+			words += word.Text
+		}
+		if words != "Hello world" {
+			t.Fatalf("%q left a voice marker in words: %q", prefix, words)
+		}
+	}
+	d := parseLyrics("[00:01]I wrote v1: yesterday")
+	if d.Lines[0].Text != "I wrote v1: yesterday" {
+		t.Fatal("stripped actual lyric text", d)
+	}
+}
+
 func TestLyricsFormatsAndSeekBoundaries(t *testing.T) {
 	plain := parseLyrics("\ufeffFirst line\r\n\r\nSecond line\r\n")
 	if plain.Timed || plain.WordTimed || len(plain.Lines) != 3 || plain.Lines[2].Text != "Second line" {

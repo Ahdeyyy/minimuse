@@ -1,4 +1,5 @@
-// Package audio streams a single file through bounded PCM buffers.
+// Package audio streams files through bounded PCM buffers, with at most two
+// playback streams during a crossfade.
 package audio
 
 import (

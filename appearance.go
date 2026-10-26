@@ -45,11 +45,11 @@ func (a *app) setTheme() {
 	t.AccentText = ui.Hex("#ffffff")
 	if a.prefs.Dark {
 		t.Dark = true
-		t.Background = ui.Hex("#111521")
-		t.Surface = ui.Hex("#1a2030")
-		t.SurfaceHover = ui.Hex("#252e43")
-		t.SurfacePressed = ui.Hex("#303c59")
-		t.Border = ui.Hex("#2b354b")
+		t.Background = ui.Hex("#08090f")
+		t.Surface = ui.Hex("#101119")
+		t.SurfaceHover = ui.Hex("#1a1c2b")
+		t.SurfacePressed = ui.Hex("#25283d")
+		t.Border = ui.Hex("#252737")
 		t.Text = ui.Hex("#e9edf7")
 		t.TextMuted = ui.Hex("#9ba9c3")
 		t.Accent = ui.Hex("#a3adff")
@@ -59,7 +59,7 @@ func (a *app) setTheme() {
 	t.AccentPressed = t.Accent.Mix(t.Text, .22)
 	t.Selection = ui.Hex("#e8ebfb")
 	if t.Dark {
-		t.Selection = ui.Hex("#303c59")
+		t.Selection = ui.Hex("#25283d")
 	}
 	t.Focus = t.Accent.Alpha(.6)
 	t.Scrollbar = t.TextMuted.Alpha(.3)
@@ -99,8 +99,10 @@ var icons = func() map[string]*ui.SVG {
 		"expand":   `<path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5M3 3l6 6m12-6-6 6M3 21l6-6m12 6-6-6"/>`,
 		"back":     `<path d="m14 5-7 7 7 7"/>`,
 		"check":    `<path d="m5 12 4 4L19 6"/>`,
+		"follow":   `<path d="M5 4h14M5 20h14M12 7v10m-3-3 3 3 3-3"/>`,
 	}
 	paths["repeat-one"] = paths["repeat"] + `<path d="m10 10 2-2v8m-2 0h4"/>`
+	paths["heart-filled"] = `<g fill="currentColor">` + paths["heart"] + `</g>`
 	out := make(map[string]*ui.SVG, len(paths))
 	for name, path := range paths {
 		out[name] = ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">` + path + `</svg>`))
@@ -129,6 +131,9 @@ func coverFor(t *track) *ui.SVG {
 
 func iconButton(c *ui.Context, name, label string, active bool) ui.Element {
 	t := c.Theme()
+	if name == "heart" && active {
+		name = "heart-filled"
+	}
 	b := ui.Button(c, "").Label(label).Tooltip(label).Size(34, 34).Padding(0).Gap(0).Center().Shrink(0).Border(0, ui.Transparent).Background(ui.Transparent).TextColor(t.Text).Radius(8)
 	if b.Hovered() {
 		b.Background(t.SurfaceHover)

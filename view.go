@@ -64,13 +64,9 @@ func (a *app) view(c *ui.Context) {
 
 func (a *app) sidebar(c *ui.Context) {
 	t := c.Theme()
-	ui.Column(c).Width(164).FillHeight().Padding(8, 4).Gap(6).Children(func() {
-		ui.Scroll(c).FillWidth().Grow(1).MinHeight(0).Children(func() {
+	ui.Column(c).Width(180).FillHeight().Padding(8, 4).Gap(6).Children(func() {
+		ui.Scroll(c).FillWidth().Grow(1).MinHeight(0).Padding(0, 16, 0, 0).Children(func() {
 			ui.Column(c).FillWidth().Gap(6).Children(func() {
-				ui.Row(c).AlignItems(ui.Center).Gap(10).Padding(6, 8, 30, 8).Children(func() {
-					ui.Image(c, vinylLogo).Size(32, 32)
-					ui.Text(c, "minimuse").FontSize(18).Bold()
-				})
 				ui.Text(c, "LIBRARY").FontSize(10).Bold().TextColor(t.TextMuted).Padding(0, 12, 8, 12)
 				for _, item := range []struct {
 					label, icon string
@@ -109,7 +105,7 @@ func (a *app) sidebar(c *ui.Context) {
 				if len(a.prefs.Playlists) == 0 {
 					ui.Text(c, "No playlists").FontSize(10).TextColor(t.TextMuted).Padding(4, 12)
 				} else {
-					ui.List(c.Key("playlists"), &a.playlistList, len(a.prefs.Playlists)).FillWidth().Height(float32(min(160, max(42, len(a.prefs.Playlists)*42)))).ItemKey(func(i int) any { return a.prefs.Playlists[i].Name }).Rows(func(row ui.ListRow) {
+					ui.List(c.Key("playlists"), &a.playlistList, len(a.prefs.Playlists)).FillWidth().Padding(0, 16, 0, 0).Height(float32(min(160, max(42, len(a.prefs.Playlists)*42)))).ItemKey(func(i int) any { return a.prefs.Playlists[i].Name }).Rows(func(row ui.ListRow) {
 						c := row.Context
 						name := a.prefs.Playlists[row.Index].Name
 						b := ui.Button(c, "").Label(name).Tooltip(name).FillWidth().Padding(9, 12).Gap(8).AlignItems(ui.Center).Background(ui.Transparent).Border(0, ui.Transparent)
@@ -196,7 +192,7 @@ func (a *app) libraryView(c *ui.Context, width float32) {
 		a.emptyView(c)
 		return
 	}
-	ui.Row(c).FillWidth().Height(32).Padding(0, 24).Gap(12).AlignItems(ui.Center).Background(t.Background.Alpha(.6)).Children(func() {
+	ui.Row(c).FillWidth().Height(32).Padding(0, 40, 0, 24).Gap(12).AlignItems(ui.Center).Background(t.Background.Alpha(.6)).Children(func() {
 		ui.Text(c, "#").Width(20).FontSize(10).TextColor(t.TextMuted)
 		ui.Text(c, "TITLE / ARTIST").Width(0).Grow(1).FontSize(10).TextColor(t.TextMuted)
 		if width >= 1000 {
@@ -206,7 +202,7 @@ func (a *app) libraryView(c *ui.Context, width float32) {
 		ui.Text(c, "TIME").Width(46).FontSize(10).TextColor(t.TextMuted).TextAlign(ui.End)
 		ui.Spacer(c).Width(68).Grow(0).Shrink(0)
 	})
-	ui.List(c.Key(a.section), &a.list, len(a.filtered)).FillWidth().Grow(1).MinHeight(0).Padding(8, 12).
+	ui.List(c.Key(a.section), &a.list, len(a.filtered)).FillWidth().Grow(1).MinHeight(0).Padding(8, 28, 8, 12).
 		ItemKey(func(i int) any { return a.prefs.Tracks[a.filtered[i]].Path }).Rows(func(row ui.ListRow) {
 		c := row.Context
 		i := row.Index
@@ -244,9 +240,16 @@ func (a *app) libraryView(c *ui.Context, width float32) {
 			iconButton(c, "heart", "Favorite "+tr.Title, tr.Favorite).Size(28, 28).OnClick(func() { a.favorite(tr.Path) })
 			iconButton(c, "more", "Actions for "+tr.Title, false).Size(28, 28).Menu(func(m *ui.Menu) { a.trackMenu(m, tr.Path, i) })
 		})
+		if current && a.status.Path == tr.Path && !a.status.Ended && a.status.Error == "" {
+			e.OnClick(a.openSong)
+		}
 	}).OnSubmit(func() {
 		if a.selected >= 0 {
-			a.playFrom(a.selected)
+			if a.prefs.Tracks[a.filtered[a.selected]].Path == a.prefs.Current && a.status.Path == a.prefs.Current && !a.status.Ended && a.status.Error == "" {
+				a.openSong()
+			} else {
+				a.playFrom(a.selected)
+			}
 		}
 	})
 	ui.Row(c).FillWidth().Height(38).Padding(0, 24).AlignItems(ui.Center).Children(func() {
@@ -282,16 +285,16 @@ func (a *app) transport(c *ui.Context, width float32) {
 	t := c.Theme()
 	tr := a.current()
 	ui.Row(c).FillWidth().Height(112).Padding(14, 24).Gap(24).AlignItems(ui.Center).Background(t.Surface).Border(1, t.Border.Alpha(.65)).Children(func() {
-		b := ui.Button(c, "").Label("Open song screen").Tooltip("Open currently playing song · Ctrl+L").Width(192).Padding(0).Gap(12).AlignItems(ui.Center).Background(ui.Transparent).Border(0, ui.Transparent).Disabled(tr == nil)
+		b := ui.Button(c, "").Label("Open song screen").Tooltip("Open currently playing song · Ctrl+L").Width(min(360, max(216, width*.28))).Shrink(0).Padding(0).Gap(12).AlignItems(ui.Center).Background(ui.Transparent).Border(0, ui.Transparent).Disabled(tr == nil)
 		b.Children(func() {
 			ui.Image(c, a.coverFor(tr)).Size(46, 46).Radius(7).Clip().Shrink(0)
-			ui.Column(c).Grow(1).MinWidth(0).Gap(6).Children(func() {
+			ui.Column(c).Width(0).Grow(1).MinWidth(0).Gap(6).Children(func() {
 				title, artist := "Nothing playing", ""
 				if tr != nil {
 					title, artist = tr.Title, tr.Artist
 				}
-				ui.Text(c, title).FontSize(12).Bold().SingleLine()
-				ui.Text(c, artist).FontSize(10).TextColor(t.TextMuted).SingleLine()
+				ui.Text(c, title).FontSize(12).Bold().FillWidth().SingleLine().Tooltip(title)
+				ui.Text(c, artist).FontSize(10).TextColor(t.TextMuted).FillWidth().SingleLine().Tooltip(artist)
 			})
 		})
 		b.OnClick(a.openSong)
@@ -305,8 +308,14 @@ func (a *app) transport(c *ui.Context, width float32) {
 }
 
 func (a *app) playbackButtons(c *ui.Context) {
+	a.playbackControls(c, true)
+}
+
+func (a *app) playbackControls(c *ui.Context, extended bool) {
 	t := c.Theme()
-	iconButton(c, "shuffle", "Shuffle", a.prefs.Shuffle).OnClick(func() { a.prefs.Shuffle = !a.prefs.Shuffle; a.bag = nil; a.history = nil; a.persist() })
+	if extended {
+		iconButton(c, "shuffle", "Shuffle", a.prefs.Shuffle).OnClick(func() { a.prefs.Shuffle = !a.prefs.Shuffle; a.bag = nil; a.history = nil; a.persist() })
+	}
 	iconButton(c, "previous", "Previous song", false).Disabled(len(a.prefs.Queue) == 0).OnClick(a.previous)
 	name := "play"
 	if a.status.Playing {
@@ -316,19 +325,21 @@ func (a *app) playbackButtons(c *ui.Context) {
 	b.Children(func() { ui.Icon(c, icons[name]).Size(20, 20).Shrink(0).Label("Play / Pause icon") })
 	b.OnClick(a.toggle)
 	iconButton(c, "next", "Next song", false).Disabled(len(a.prefs.Queue) == 0).OnClick(func() { a.advance(false) })
-	repeat := []string{"Repeat off", "Repeat all", "Repeat one"}[a.prefs.Repeat]
-	repeatIcon := "repeat"
-	if a.prefs.Repeat == 2 {
-		repeatIcon = "repeat-one"
+	if extended {
+		repeat := []string{"Repeat off", "Repeat all", "Repeat one"}[a.prefs.Repeat]
+		repeatIcon := "repeat"
+		if a.prefs.Repeat == 2 {
+			repeatIcon = "repeat-one"
+		}
+		iconButton(c, repeatIcon, repeat, a.prefs.Repeat != 0).OnClick(func() { a.prefs.Repeat = (a.prefs.Repeat + 1) % 3; a.persist() })
 	}
-	iconButton(c, repeatIcon, repeat, a.prefs.Repeat != 0).OnClick(func() { a.prefs.Repeat = (a.prefs.Repeat + 1) % 3; a.persist() })
 }
 
 func (a *app) seekControl(c *ui.Context) {
 	t := c.Theme()
 	ui.Row(c).FillWidth().Gap(8).AlignItems(ui.Center).Children(func() {
 		ui.Text(c, clockTime(a.status.Position)).FontSize(10).TextColor(t.TextMuted).Width(40).Shrink(0)
-		ui.Slider(c.Key("seek"), &a.seek, 0, max(1, a.status.Duration.Seconds())).Width(0).Grow(1).Label("Seek").Disabled(a.status.Duration == 0 || a.status.Ended).OnChange(func() {
+		ui.Slider(c.Key("seek"), &a.seek, 0, max(1, a.status.Duration.Seconds())).Width(0).Grow(1).MinWidth(20).Label("Seek").Disabled(a.status.Duration == 0 || a.status.Ended).OnChange(func() {
 			if a.engine != nil {
 				a.engine.Seek(time.Duration(a.seek * float64(time.Second)))
 			}
@@ -344,7 +355,7 @@ func (a *app) volumeControl(c *ui.Context, width float32) {
 			name = "mute"
 		}
 		iconButton(c, name, "Mute", a.muted).OnClick(a.mute)
-		ui.Slider(c.Key("volume"), &a.prefs.Volume, 0, 100).Width(0).Grow(1).Label("Volume").Tooltip(fmt.Sprintf("Volume: %d%%", int(a.prefs.Volume))).OnChange(a.setVolume)
+		ui.Slider(c.Key("volume"), &a.prefs.Volume, 0, 100).Width(0).Grow(1).MinWidth(20).Label("Volume").Tooltip(fmt.Sprintf("Volume: %d%%", int(a.prefs.Volume))).OnChange(a.setVolume)
 	})
 }
 
@@ -452,7 +463,7 @@ func (a *app) settingsDialog(c *ui.Context) {
 			ui.Spacer(c).Grow(1)
 			iconButton(c, "close", "Close settings", false).OnClick(func() { a.settings = false })
 		})
-		ui.Scroll(c).FillWidth().Grow(1).MinHeight(0).Children(func() {
+		ui.Scroll(c).FillWidth().Grow(1).MinHeight(0).Padding(0, 16, 0, 0).Children(func() {
 			ui.Column(c).FillWidth().Gap(16).Children(func() {
 				ui.Checkbox(c, &a.prefs.CloseToTray, "Close to tray").OnChange(a.persist)
 				ui.Text(c, "Keep playing when you close the window. Use Quit MiniMuse in the tray menu to fully exit.").FillWidth().FontSize(12).TextColor(c.Theme().TextMuted).LineHeight(1.6)
@@ -469,16 +480,27 @@ func (a *app) settingsDialog(c *ui.Context) {
 				})
 				ui.Text(c, "Audio").Bold()
 				ui.Text(c, "48 kHz stereo · 32-bit float").FillWidth().FontSize(12).TextColor(c.Theme().TextMuted)
-				ui.Text(c, "Music folders").Bold()
-				if len(a.prefs.Folders) == 0 {
-					ui.Text(c, "Add a folder from the library to keep it available for refresh.").FillWidth().FontSize(12).TextColor(c.Theme().TextMuted)
-				}
-				for _, folder := range a.prefs.Folders {
-					ui.Row(c.Key(folder)).FillWidth().Gap(8).AlignItems(ui.Center).Children(func() {
-						ui.Text(c, folder).Width(0).Grow(1).SingleLine().Tooltip(folder).FontSize(11).TextColor(c.Theme().TextMuted)
-						iconButton(c, "refresh", "Refresh folder "+folder, false).Disabled(a.importing).OnClick(func() { a.importPaths([]string{folder}) })
-					})
-				}
+				ui.Checkbox(c, &a.prefs.Crossfade, "Crossfade between tracks").OnChange(a.crossfadeChanged)
+				ui.Row(c).FillWidth().Gap(12).AlignItems(ui.Center).Children(func() {
+					ui.Text(c, "Fade duration").FontSize(12).Grow(1)
+					ui.NumberInput(c, &a.prefs.CrossfadeSeconds, 1, 12, .5).Width(160).Shrink(0).Label("Crossfade duration (seconds)").Disabled(!a.prefs.Crossfade).OnChange(a.crossfadeChanged)
+					ui.Text(c, "seconds").FontSize(11).TextColor(c.Theme().TextMuted)
+				})
+				ui.Text(c, "Blend the end of a song into the next. Shorter fades switch faster; longer fades blend more gradually.").FillWidth().FontSize(12).TextColor(c.Theme().TextMuted).LineHeight(1.6)
+				ui.Collapsible(c.Key("music-folders"), fmt.Sprintf("Music folders (%d)", len(a.prefs.Folders)), &a.foldersOpen, func() {
+					if len(a.prefs.Folders) == 0 {
+						ui.Text(c, "Add a folder from the library to keep it available for refresh.").FillWidth().FontSize(12).TextColor(c.Theme().TextMuted)
+					} else {
+						ui.List(c.Key("saved-folders"), &a.folderList, len(a.prefs.Folders)).FillWidth().Height(float32(min(168, len(a.prefs.Folders)*42))).Padding(0, 16, 0, 0).ItemKey(func(i int) any { return a.prefs.Folders[i] }).Rows(func(row ui.ListRow) {
+							c := row.Context
+							folder := a.prefs.Folders[row.Index]
+							ui.Row(c).FillWidth().Height(42).Gap(8).AlignItems(ui.Center).Children(func() {
+								ui.Text(c, folder).Width(0).Grow(1).SingleLine().Tooltip(folder).FontSize(11).TextColor(c.Theme().TextMuted)
+								iconButton(c, "refresh", "Refresh folder "+folder, false).Disabled(a.importing).OnClick(func() { a.importMusic([]string{folder}, true) })
+							})
+						})
+					}
+				}).FillWidth()
 				ui.Text(c, "Keyboard").Bold()
 				ui.Text(c, "Space / Ctrl+P   Play / pause\nCtrl+← / →   Previous / next\nCtrl+M   Mini player\nCtrl+L   Playing now\nCtrl+R   Refresh folders\nCtrl+O   Add songs\nCtrl+F   Search\nCtrl+Q   Quit").FillWidth().FontSize(12).TextColor(c.Theme().TextMuted).LineHeight(1.8)
 			})

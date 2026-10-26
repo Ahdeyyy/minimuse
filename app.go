@@ -22,6 +22,7 @@ type playbackEngine interface {
 	Stop()
 	Seek(time.Duration)
 	Volume(float64)
+	Crossfade(time.Duration)
 	Snapshot() audio.Status
 	Close()
 }
@@ -56,10 +57,13 @@ type app struct {
 	albumKey         string
 	albumList        ui.ListState
 	mini             bool
+	miniVolumeOpen   bool
 	mainBounds       mygo.Rectangle
 	mainMaximized    bool
 	miniBounds       mygo.Rectangle
 	settings         bool
+	foldersOpen      bool
+	folderList       ui.ListState
 	playlistDialog   bool
 	playlistName     string
 	playlistList     ui.ListState
@@ -83,6 +87,7 @@ type app struct {
 	lyricList        ui.ListState
 	lyricActive      int
 	followLyrics     bool
+	lyricTimingOpen  bool
 	art              map[string]*artEntry
 	artJobs          chan track
 	artClock         uint64
@@ -96,6 +101,9 @@ func newApp(p preferences, path string) *app {
 	a.artJobs = make(chan track, 64)
 	a.lyricActive = -1
 	a.followLyrics = true
+	if a.prefs.CrossfadeSeconds <= 0 {
+		a.prefs.CrossfadeSeconds = 4
+	}
 	// Older libraries did not retain their folder selections. Seed refresh
 	// sources from their existing song directories once during migration.
 	if len(a.prefs.Folders) == 0 {
@@ -138,6 +146,7 @@ func (a *app) start() {
 		}
 	})
 	a.engine.Volume(a.prefs.Volume / 100)
+	a.configureCrossfade()
 	// This timer exists only while a visible, non-minimized window is playing.
 	go func() {
 		var ticker *time.Ticker
@@ -286,6 +295,10 @@ func (a *app) current() *track {
 }
 
 func (a *app) importPaths(paths []string, autoplay ...bool) {
+	a.importMusic(paths, false, autoplay...)
+}
+
+func (a *app) importMusic(paths []string, refresh bool, autoplay ...bool) {
 	if a.importing || len(paths) == 0 {
 		return
 	}
@@ -295,7 +308,15 @@ func (a *app) importPaths(paths []string, autoplay ...bool) {
 	for key := range a.byPath {
 		known[key] = true
 	}
+	var oldTracks []track
+	if refresh {
+		oldTracks = slices.Clone(a.prefs.Tracks)
+	}
 	go func() {
+		var missingFolders, missingTracks map[string]bool
+		if refresh {
+			paths, missingFolders, missingTracks = missingMusic(a.ctx, paths, oldTracks)
+		}
 		var folders []string
 		for _, path := range paths {
 			if info, err := os.Stat(path); err == nil && info.IsDir() {
@@ -313,6 +334,10 @@ func (a *app) importPaths(paths []string, autoplay ...bool) {
 				return
 			}
 			a.importing = false
+			if a.ctx.Err() != nil {
+				return
+			}
+			a.pruneMissingMusic(missingFolders, missingTracks)
 			for _, folder := range folders {
 				if !slices.ContainsFunc(a.prefs.Folders, func(p string) bool { return pathKey(p) == pathKey(folder) }) {
 					a.prefs.Folders = append(a.prefs.Folders, folder)
@@ -325,6 +350,9 @@ func (a *app) importPaths(paths []string, autoplay ...bool) {
 			a.notice = fmt.Sprintf("Added %d songs", len(tracks))
 			if len(tracks) == 0 {
 				a.notice = "No new supported songs found. Try MP3, FLAC, WAV, or Ogg Vorbis."
+			}
+			if refresh {
+				a.notice = fmt.Sprintf("Refresh complete · %d added · %d missing songs removed · %d missing folders removed", len(tracks), len(missingTracks), len(missingFolders))
 			}
 			if skipped > 0 {
 				a.notice += fmt.Sprintf(" · %d unreadable entries", skipped)
@@ -451,9 +479,24 @@ func (a *app) acceptStatus(s audio.Status) {
 		}
 		a.tray.SetToolTip(label)
 	}
-	if s.Ended {
+	if s.Ended || s.NearEnd && s.Playing && a.prefs.Crossfade && a.prefs.Repeat != 2 {
 		a.advance(true)
 	}
+}
+
+func (a *app) configureCrossfade() {
+	if a.engine != nil {
+		var duration time.Duration
+		if a.prefs.Crossfade {
+			duration = time.Duration(a.prefs.CrossfadeSeconds * float64(time.Second))
+		}
+		a.engine.Crossfade(duration)
+	}
+}
+
+func (a *app) crossfadeChanged() {
+	a.configureCrossfade()
+	a.persist()
 }
 
 func (a *app) advance(automatic bool) {

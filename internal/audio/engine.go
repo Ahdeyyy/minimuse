@@ -14,6 +14,7 @@ type Status struct {
 	Path                       string
 	Playing                    bool
 	Ended                      bool
+	NearEnd                    bool // asks the queue for its next track once per playback/seek
 	Position, Duration         time.Duration
 	SampleRate, Bits, Channels int
 	Error                      string
@@ -60,6 +61,11 @@ func (e *Engine) Stop()                 { e.send(command{kind: "stop"}) }
 func (e *Engine) Seek(d time.Duration)  { e.send(command{kind: "seek", value: d.Seconds()}) }
 func (e *Engine) Volume(v float64)      { e.send(command{kind: "volume", value: max(0, min(1, v))}) }
 func (e *Engine) Snapshot() Status      { return *e.status.Load() }
+
+// Crossfade sets the overlap duration. Zero disables it.
+func (e *Engine) Crossfade(d time.Duration) {
+	e.send(command{kind: "crossfade", value: max(0, min(12, d.Seconds()))})
+}
 func (e *Engine) Close() {
 	e.once.Do(func() { e.closed.Store(true); e.commands <- command{kind: "close"} })
 	<-e.done
@@ -70,10 +76,15 @@ func (e *Engine) run() {
 	var device *oto.Context
 	var player *oto.Player
 	var source *pcmReader
+	var outgoing *oto.Player
+	var outgoingSource *pcmReader
+	var crossfade, overlap time.Duration
+	outgoingGain := 1.0
+	nearEndSent := false
 	var state Status
 	volume := 1.0
 	var tick <-chan time.Time
-	timer := time.NewTicker(250 * time.Millisecond)
+	timer := time.NewTicker(40 * time.Millisecond)
 	timer.Stop()
 	defer timer.Stop()
 	publish := func(notify bool) {
@@ -90,9 +101,30 @@ func (e *Engine) run() {
 			e.onChange(s)
 		}
 	}
+	releaseOutgoing := func() {
+		if outgoing != nil {
+			outgoing.PauseAndStopReading()
+			_ = outgoing.Close()
+			outgoingSource.decoder.Close()
+			outgoing, outgoingSource = nil, nil
+		}
+		overlap = 0
+	}
+	applyVolume := func() {
+		gain := 1.0
+		if outgoing != nil {
+			gain = fadeProgress(state.Position, overlap)
+			outgoing.SetVolume(volume * outgoingGain * (1 - gain))
+		}
+		if player != nil {
+			player.SetVolume(volume * gain)
+		}
+	}
 	release := func() {
+		releaseOutgoing()
 		if player != nil {
 			player.PauseAndStopReading()
+			_ = player.Close()
 			player = nil
 		}
 		if source != nil {
@@ -114,10 +146,26 @@ func (e *Engine) run() {
 			case "close":
 				return
 			case "load":
-				release()
+				publish(false)
+				// Keep at most two bounded streaming players alive. A new skip
+				// during a fade retires the oldest voice first.
+				outgoingGain = 1
+				if outgoing != nil {
+					outgoingGain = fadeProgress(state.Position, overlap)
+				}
+				releaseOutgoing()
+				if crossfade > 0 && player != nil && state.Playing && player.IsPlaying() {
+					outgoing, outgoingSource = player, source
+					overlap = min(crossfade, max(0, state.Duration-state.Position))
+					player, source = nil, nil
+				} else {
+					release()
+				}
 				state = Status{Path: c.path}
+				nearEndSent = false
 				s, f, err := Decode(c.path)
 				if err != nil {
+					release()
 					state.Error = err.Error()
 					publish(true)
 					continue
@@ -141,19 +189,23 @@ func (e *Engine) run() {
 					continue
 				}
 				state.Duration, state.SampleRate, state.Bits, state.Channels = source.duration(), int(f.SampleRate), f.Precision*8, f.NumChannels
+				overlap = min(overlap, state.Duration/2)
 				player = device.NewPlayer(source)
 				player.SetBufferSize(OutputRate * bytesPerFrame / 8) // 125 ms, 48 KB
-				player.SetVolume(volume)
+				applyVolume()
 				player.Play()
 				state.Playing = true
 				tick = timer.C
-				timer.Reset(250 * time.Millisecond)
+				timer.Reset(40 * time.Millisecond)
 			case "toggle":
 				if player == nil {
 					continue
 				}
 				if state.Playing {
 					player.PauseAndStopReading()
+					if outgoing != nil {
+						outgoing.PauseAndStopReading()
+					}
 					_ = device.Suspend()
 					timer.Stop()
 					tick = nil
@@ -164,7 +216,10 @@ func (e *Engine) run() {
 						continue
 					}
 					player.Play()
-					timer.Reset(250 * time.Millisecond)
+					if outgoing != nil {
+						outgoing.Play()
+					}
+					timer.Reset(40 * time.Millisecond)
 					tick = timer.C
 				}
 				state.Playing = !state.Playing
@@ -174,13 +229,22 @@ func (e *Engine) run() {
 				state.Ended = false
 			case "volume":
 				volume = c.value
-				if player != nil {
-					player.SetVolume(volume)
+				applyVolume()
+			case "crossfade":
+				crossfade = time.Duration(c.value * float64(time.Second))
+				nearEndSent = false
+				if crossfade == 0 {
+					releaseOutgoing()
+					applyVolume()
 				}
 			case "seek":
 				if player == nil {
 					continue
 				}
+				releaseOutgoing()
+				applyVolume()
+				nearEndSent = false
+				state.NearEnd = false
 				_, err := player.Seek(int64(c.value*OutputRate)*bytesPerFrame, io.SeekStart)
 				if err != nil {
 					state.Error = fmt.Sprintf("seek: %v", err)
@@ -204,7 +268,34 @@ func (e *Engine) run() {
 				publish(true)
 			} else {
 				publish(false)
+				if outgoing != nil {
+					applyVolume()
+					if state.Position >= overlap || !outgoing.IsPlaying() || outgoing.Err() != nil {
+						releaseOutgoing()
+						applyVolume()
+					}
+				}
+				// Cap the overlap on short tracks so each track has a solo
+				// section, and never request the next while still fading in.
+				if !nearEndSent && outgoing == nil && shouldCrossfade(state, crossfade) {
+					nearEndSent = true
+					state.NearEnd = true
+					publish(true)
+					state.NearEnd = false
+				}
 			}
 		}
 	}
+}
+
+func fadeProgress(position, duration time.Duration) float64 {
+	if duration <= 0 {
+		return 1
+	}
+	return max(0, min(1, float64(position)/float64(duration)))
+}
+
+func shouldCrossfade(s Status, duration time.Duration) bool {
+	return duration > 0 && s.Playing && !s.Ended && s.Duration > 0 &&
+		s.Position >= s.Duration-min(duration, s.Duration/2)
 }

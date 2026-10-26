@@ -175,7 +175,15 @@ func TestRealDeviceLifecycle(t *testing.T) {
 	if os.Getenv("MINIMUSE_AUDIO_INTEGRATION") != "1" {
 		t.Skip("set MINIMUSE_AUDIO_INTEGRATION=1 to exercise the sound device (muted)")
 	}
-	e := New(nil)
+	requests := make(chan Status, 8)
+	e := New(func(s Status) {
+		if s.NearEnd {
+			select {
+			case requests <- s:
+			default:
+			}
+		}
+	})
 	defer e.Close()
 	e.Volume(0)
 	path := writeWAV(t, 44100, 3)
@@ -212,6 +220,68 @@ func TestRealDeviceLifecycle(t *testing.T) {
 	wait(func(s Status) bool { return s.Ended })
 	if err := os.Remove(path); err != nil {
 		t.Fatal("finished decoder still holds file", err)
+	}
+	// Two real players overlap on the same output device. Pause freezes both
+	// voices and their envelope; normal completion retires the old decoder.
+	first, second := writeWAV(t, 44100, 3), writeWAV(t, 48000, 3)
+	e.Crossfade(time.Second)
+	e.Load(first)
+	select {
+	case s := <-requests:
+		if s.Path != first || s.Position < 2*time.Second || s.Ended {
+			t.Fatal("crossfade requested outside the overlap window", s)
+		}
+	case <-time.After(6 * time.Second):
+		t.Fatal("engine did not request the next track")
+	}
+	e.Load(second)
+	wait(func(s Status) bool { return s.Path == second && s.Playing && s.Position > 120*time.Millisecond })
+	if runtime.GOOS == "windows" {
+		if err := os.Remove(first); err == nil {
+			t.Fatal("outgoing decoder was released before the crossfade finished")
+		}
+	}
+	e.Toggle()
+	paused = wait(func(s Status) bool { return !s.Playing })
+	time.Sleep(200 * time.Millisecond)
+	if e.Snapshot().Position != paused.Position {
+		t.Fatal("paused crossfade advanced")
+	}
+	e.Toggle()
+	wait(func(s Status) bool { return s.Playing && s.Position > 1200*time.Millisecond })
+	if err := os.Remove(first); err != nil {
+		t.Fatal("crossfade retained its outgoing decoder", err)
+	}
+	// Rapid skips, seek, disable, and stop each release obsolete streams.
+	third := writeWAV(t, 48000, 3)
+	e.Load(third)
+	wait(func(s Status) bool { return s.Path == third && s.Playing && s.Position > 100*time.Millisecond })
+	fourth := writeWAV(t, 48000, 3)
+	e.Load(fourth)
+	wait(func(s Status) bool { return s.Path == fourth && s.Playing && s.Position > 100*time.Millisecond })
+	if err := os.Remove(second); err != nil {
+		t.Fatal("rapid skip retained the oldest decoder", err)
+	}
+	e.Seek(500 * time.Millisecond)
+	wait(func(s Status) bool { return s.Position >= 500*time.Millisecond })
+	if err := os.Remove(third); err != nil {
+		t.Fatal("seek retained the outgoing decoder", err)
+	}
+	fifth := writeWAV(t, 48000, 3)
+	e.Load(fifth)
+	wait(func(s Status) bool { return s.Path == fifth && s.Playing && s.Position > 100*time.Millisecond })
+	e.Crossfade(0)
+	// Commands are serialized; the following seek notification also verifies
+	// that disabling the overlap has completed before checking the handle.
+	e.Seek(time.Second)
+	wait(func(s Status) bool { return s.Position >= time.Second })
+	if err := os.Remove(fourth); err != nil {
+		t.Fatal("disabling crossfade retained its outgoing decoder", err)
+	}
+	e.Stop()
+	wait(func(s Status) bool { return !s.Playing && s.Position == 0 })
+	if err := os.Remove(fifth); err != nil {
+		t.Fatal("stop retained the current decoder", err)
 	}
 	if seconds, _ := strconv.Atoi(os.Getenv("MINIMUSE_AUDIO_SOAK_SECONDS")); seconds > 0 {
 		path = writeWAV(t, 48000, seconds+5)

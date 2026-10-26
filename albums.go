@@ -130,7 +130,7 @@ func (a *app) albumOverview(c *ui.Context, width float32) {
 	panelWidth := width - 230
 	columns := max(1, int((panelWidth-32)/172))
 	rows := (len(a.visibleAlbums) + columns - 1) / columns
-	ui.List(c.Key("album-grid"), &a.albumList, rows).FillWidth().Grow(1).MinHeight(0).Padding(8, 20, 20, 20).
+	ui.List(c.Key("album-grid"), &a.albumList, rows).FillWidth().Grow(1).MinHeight(0).Padding(8, 36, 20, 20).
 		ItemKey(func(i int) any { return a.albums[a.visibleAlbums[i*columns]].Key }).Rows(func(row ui.ListRow) {
 		c := row.Context
 		ui.Row(c).FillWidth().Height(244).Gap(12).Padding(0, 0, 12, 0).Children(func() {

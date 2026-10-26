@@ -22,17 +22,18 @@ import (
 )
 
 type track struct {
-	Path         string
-	Title        string
-	Artist       string
-	Album        string
-	AlbumArtist  string
-	Number       int
-	Disc         int
-	Favorite     bool
-	Duration     time.Duration
-	MediaVersion int
-	search       string
+	Path          string
+	Title         string
+	Artist        string
+	Album         string
+	AlbumArtist   string
+	Number        int
+	Disc          int
+	Favorite      bool
+	Duration      time.Duration
+	MediaVersion  int
+	LyricOffsetMS float64 `json:",omitempty"`
+	search        string
 }
 
 func (t *track) index() {
@@ -296,20 +297,22 @@ type playlist struct {
 }
 
 type preferences struct {
-	Folders     []string
-	Tracks      []track
-	Queue       []string
-	Current     string
-	Volume      float64
-	Shuffle     bool
-	Repeat      int // 0 off, 1 all, 2 one
-	Dark        bool
-	CloseToTray bool
-	Playlists   []playlist
+	Folders          []string
+	Tracks           []track
+	Queue            []string
+	Current          string
+	Volume           float64
+	Shuffle          bool
+	Repeat           int // 0 off, 1 all, 2 one
+	Dark             bool
+	CloseToTray      bool
+	Crossfade        bool
+	CrossfadeSeconds float64
+	Playlists        []playlist
 }
 
 func loadPreferences(path string) (preferences, error) {
-	p := preferences{Volume: 80, CloseToTray: true}
+	p := preferences{Volume: 80, CloseToTray: true, CrossfadeSeconds: 4}
 	b, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return p, nil
@@ -318,13 +321,15 @@ func loadPreferences(path string) (preferences, error) {
 		return p, err
 	}
 	if err = json.Unmarshal(b, &p); err != nil {
-		return preferences{Volume: 80, CloseToTray: true}, fmt.Errorf("could not read saved library: %w", err)
+		return preferences{Volume: 80, CloseToTray: true, CrossfadeSeconds: 4}, fmt.Errorf("could not read saved library: %w", err)
 	}
 	p.Volume = max(0, min(100, p.Volume))
+	p.CrossfadeSeconds = max(1, min(12, p.CrossfadeSeconds))
 	if p.Repeat < 0 || p.Repeat > 2 {
 		p.Repeat = 0
 	}
 	for i := range p.Tracks {
+		p.Tracks[i].LyricOffsetMS = max(-300000, min(300000, p.Tracks[i].LyricOffsetMS))
 		p.Tracks[i].index()
 	}
 	return p, nil

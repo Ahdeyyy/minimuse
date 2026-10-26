@@ -362,5 +362,5 @@ func (a *app) refreshFolders() {
 			delete(a.art, k)
 		}
 	}
-	a.importPaths(paths)
+	a.importMusic(paths, true)
 }

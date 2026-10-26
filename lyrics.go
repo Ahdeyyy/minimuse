@@ -40,6 +40,9 @@ var lyricStamp = regexp.MustCompile(`\[(\d+:\d{2}(?:[.:]\d{1,3})?)\]`)
 var wordStamp = regexp.MustCompile(`<(\d+:\d{2}(?:[.:]\d{1,3})?)>`)
 var lyricMeta = regexp.MustCompile(`^\[([a-zA-Z]+):(.*)\]$`)
 
+// Enhanced LRC voice markers identify singers; they are not sung text.
+var lyricVoice = regexp.MustCompile(`(?i)^((?:<\d+:\d{2}(?:[.:]\d{1,3})?>\s*)*)(?:v[1-9]\d*:|\[v[1-9]\d*:?\]|<v[1-9]\d*:?>)\s*`)
+
 func parseLyricTime(s string) (time.Duration, bool) {
 	parts := strings.SplitN(s, ":", 2)
 	if len(parts) != 2 {
@@ -92,7 +95,7 @@ func parseLyrics(text string) lyricDocument {
 		if len(times) == 0 {
 			continue
 		}
-		body := strings.TrimSpace(raw[end:])
+		body := lyricVoice.ReplaceAllString(strings.TrimSpace(raw[end:]), "${1}")
 		var words []lyricWord
 		matches := wordStamp.FindAllStringSubmatchIndex(body, -1)
 		if len(matches) > 0 {
@@ -295,6 +298,33 @@ func (a *app) clearLyrics() {
 	a.lyricsBusy = false
 	a.lyricActive = -1
 	a.lyricList = ui.ListState{}
+	a.lyricTimingOpen = false
+}
+
+// Positive offsets delay the display; negative offsets bring lyrics forward.
+func (a *app) lyricOffset() time.Duration {
+	if tr := a.current(); tr != nil {
+		return time.Duration(tr.LyricOffsetMS * float64(time.Millisecond))
+	}
+	return 0
+}
+
+func (a *app) lyricPosition() time.Duration { return a.status.Position - a.lyricOffset() }
+
+func (a *app) lyricSeekTime(at time.Duration) time.Duration {
+	at = max(0, at+a.lyricOffset())
+	if a.status.Duration > 0 {
+		at = min(at, a.status.Duration)
+	}
+	return at
+}
+
+func (a *app) lyricTimingChanged() {
+	if tr := a.current(); tr != nil {
+		tr.LyricOffsetMS = max(-300000, min(300000, tr.LyricOffsetMS))
+	}
+	a.lyricActive = -1
+	a.persist()
 }
 
 func (a *app) loadLyrics(online bool) {

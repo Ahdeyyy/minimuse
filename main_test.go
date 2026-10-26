@@ -19,16 +19,18 @@ type fakeEngine struct {
 	loads          []string
 	seeks          []time.Duration
 	volume         float64
+	crossfade      time.Duration
 	toggles, stops int
 }
 
-func (f *fakeEngine) Load(path string) bool  { f.loads = append(f.loads, path); return true }
-func (f *fakeEngine) Toggle()                { f.toggles++ }
-func (f *fakeEngine) Stop()                  { f.stops++ }
-func (f *fakeEngine) Seek(d time.Duration)   { f.seeks = append(f.seeks, d) }
-func (f *fakeEngine) Volume(v float64)       { f.volume = v }
-func (f *fakeEngine) Snapshot() audio.Status { return audio.Status{} }
-func (f *fakeEngine) Close()                 {}
+func (f *fakeEngine) Load(path string) bool     { f.loads = append(f.loads, path); return true }
+func (f *fakeEngine) Toggle()                   { f.toggles++ }
+func (f *fakeEngine) Stop()                     { f.stops++ }
+func (f *fakeEngine) Seek(d time.Duration)      { f.seeks = append(f.seeks, d) }
+func (f *fakeEngine) Volume(v float64)          { f.volume = v }
+func (f *fakeEngine) Crossfade(d time.Duration) { f.crossfade = d }
+func (f *fakeEngine) Snapshot() audio.Status    { return audio.Status{} }
+func (f *fakeEngine) Close()                    {}
 
 func testApp(t testing.TB, n int) *app {
 	t.Helper()
@@ -174,6 +176,10 @@ func TestCommandLineAndSpaceShortcut(t *testing.T) {
 	if a.engine.(*fakeEngine).toggles != 1 {
 		t.Fatal("space did not toggle playback")
 	}
+	if !a.songScreen || len(a.engine.(*fakeEngine).loads) != 1 {
+		t.Fatal("selecting the current song should open Playing now without reloading")
+	}
+	click(t, tt, "Back to library")
 	click(t, tt, "Search music")
 	tt.Key(0, ui.KeySpace)
 	if a.engine.(*fakeEngine).toggles != 1 {
@@ -200,6 +206,24 @@ func TestShuffleVisitsEachSongOnce(t *testing.T) {
 	a.advance(true)
 	if len(a.engine.(*fakeEngine).loads) != before {
 		t.Fatal("shuffle did not stop")
+	}
+}
+
+func TestCurrentSongSelectionBeforeAndAfterLoading(t *testing.T) {
+	a := testApp(t, 3)
+	a.prefs.Current = a.prefs.Tracks[0].Path
+	tt := ui.NewTester(a.view, 1080, 740)
+	click(t, tt, "Song 00000")
+	if a.songScreen {
+		t.Fatal("a saved song is not yet playing")
+	}
+	tt.Key(0, ui.KeyEnter)
+	if len(a.engine.(*fakeEngine).loads) != 1 || a.songScreen {
+		t.Fatal("Enter should start the saved song")
+	}
+	tt.Key(0, ui.KeyEnter)
+	if !a.songScreen || len(a.engine.(*fakeEngine).loads) != 1 {
+		t.Fatal("Enter on the loaded song should open Playing now")
 	}
 }
 
@@ -374,13 +398,21 @@ func TestSongScreenLyricsModesAndNavigation(t *testing.T) {
 func TestCompactSettingsWithManyFolders(t *testing.T) {
 	a := testApp(t, 1)
 	a.prefs.Folders = nil
-	for i := range 12 {
+	for i := range 200 {
 		a.prefs.Folders = append(a.prefs.Folders, fmt.Sprintf("C:/Music/Collection %d", i))
 	}
 	tt := ui.NewTester(a.view, 820, 580)
 	click(t, tt, "Settings")
 	tt.Frame()
 	tt.Frame()
+	if tt.HasText("C:/Music/Collection 0") {
+		t.Fatal("folders should start collapsed")
+	}
+	click(t, tt, "Music folders (200)")
+	tt.Advance(300 * time.Millisecond)
+	if !a.foldersOpen || !tt.HasText("C:/Music/Collection 0") || tt.HasText("C:/Music/Collection 199") {
+		t.Fatal("expanded folders should use a bounded virtual list")
+	}
 	r, ok := tt.Find("Done")
 	if !ok || r.Y < 0 || r.Y+r.H > 580 {
 		t.Fatal("settings footer clipped", r)
@@ -390,6 +422,115 @@ func TestCompactSettingsWithManyFolders(t *testing.T) {
 	tt.Frame()
 	if a.settings {
 		t.Fatal("settings did not close")
+	}
+}
+
+func TestMiniPlayerResponsiveLayouts(t *testing.T) {
+	sizes := [][2]int{{260, 180}, {300, 210}, {359, 339}, {360, 180}, {420, 210}, {639, 240}, {640, 180}, {819, 300}, {820, 180}, {260, 340}, {420, 600}, {640, 340}, {900, 500}, {1600, 900}}
+	for _, dark := range []bool{false, true} {
+		for _, empty := range []bool{false, true} {
+			a := testApp(t, 3)
+			a.prefs.Dark = dark
+			a.setTheme()
+			a.mini = true
+			if !empty {
+				a.playFrom(0)
+				a.prefs.Tracks[0].Title = strings.Repeat("A very long song title ", 12)
+				a.prefs.Tracks[0].Artist = strings.Repeat("A very long artist ", 8)
+				a.status = audio.Status{Path: a.prefs.Current, Playing: true, Duration: 12 * time.Hour, Position: 2 * time.Hour}
+			}
+			a.notice = strings.Repeat("A long playback or refresh message. ", 20)
+			tt := ui.NewTester(a.view, 420, 210)
+			for _, size := range sizes {
+				tt.SetSize(size[0], size[1])
+				tt.Frame()
+				tt.Frame()
+				labels := []string{"Mini song title", "Mini album art", "Play / Pause", "Previous song", "Next song", "Seek", "Exit mini player", "Minimize window", "Close window"}
+				if size[0] < 360 || size[0] >= 640 && size[0] < 820 && size[1] < 340 {
+					if size[1] < 340 {
+						labels = append(labels, "Volume controls")
+					} else {
+						labels = append(labels, "Volume")
+					}
+				} else {
+					labels = append(labels, "Volume")
+				}
+				for _, label := range labels {
+					r, ok := tt.Find(label)
+					if !ok || r.W < 1 || r.H < 1 || r.X < -.5 || r.Y < -.5 || r.X+r.W > float32(size[0])+.5 || r.Y+r.H > float32(size[1])+.5 {
+						t.Errorf("%v dark=%v empty=%v: %s outside window: %+v", size, dark, empty, label, r)
+					}
+				}
+				for _, label := range []string{"Play / Pause", "Previous song", "Next song", "Exit mini player", "Volume", "Volume controls", "Seek"} {
+					if r, ok := tt.Find(label); ok && (r.X < 11.5 || r.X+r.W > float32(size[0])-11.5) {
+						t.Errorf("%v: %s extends into the player's side padding: %+v", size, label, r)
+					}
+				}
+				if _, ok := tt.Find("Volume controls"); ok {
+					click(t, tt, "Volume controls")
+					tt.Frame()
+					r, ok := tt.Find("Volume")
+					if !ok || r.W < 40 || r.X < 0 || r.Y < 0 || r.X+r.W > float32(size[0])+.5 || r.Y+r.H > float32(size[1])+.5 {
+						t.Errorf("%v: volume popover out of bounds: %+v", size, r)
+					}
+					tt.Key(0, ui.KeyEscape)
+					tt.Frame()
+				}
+			}
+		}
+	}
+}
+
+func TestLyricTimingControls(t *testing.T) {
+	a := testApp(t, 2)
+	a.playFrom(0)
+	a.lyricsPath = a.prefs.Current
+	a.lyrics = parseLyrics("[00:01]<00:01>Hello <00:01.5>world\n[00:03]Next")
+	a.lyricMode = "Words"
+	a.songScreen = true
+	a.status.Position = 1400 * time.Millisecond
+	tt := ui.NewTester(a.view, 820, 580)
+	click(t, tt, "Timing")
+	tt.Frame()
+	for range 5 {
+		click(t, tt, "Later")
+	}
+	if a.lyricOffset() != 500*time.Millisecond || a.lyricPosition() != 900*time.Millisecond || a.lyricActive != -1 {
+		t.Fatal("delay should apply to line and word playback", a.lyricOffset(), a.lyricPosition(), a.lyricActive)
+	}
+	tt.Key(0, ui.KeyEscape)
+	click(t, tt, "Lyric line 1")
+	if got := a.engine.(*fakeEngine).seeks; !slices.Equal(got, []time.Duration{1500 * time.Millisecond}) {
+		t.Fatal("line seeking did not include the timing offset", got)
+	}
+	click(t, tt, "Timing")
+	click(t, tt, "Reset")
+	click(t, tt, "Earlier")
+	if a.lyricOffset() != -100*time.Millisecond {
+		t.Fatal(a.lyricOffset())
+	}
+	// The value can also be edited directly, including keyboard stepping.
+	offsetField, ok := tt.Find("Lyric offset (ms)")
+	if !ok {
+		t.Fatal("missing numeric offset control")
+	}
+	// NumberInput contains the text field followed by its step buttons.
+	tt.ClickAt(offsetField.X+24, offsetField.Y+offsetField.H/2)
+	tt.Key(ui.Ctrl, ui.KeyA)
+	tt.Type("1250")
+	tt.Key(0, ui.KeyEnter)
+	if a.lyricOffset() != 1250*time.Millisecond {
+		t.Fatal("numeric offset was not applied", a.lyricOffset())
+	}
+	click(t, tt, "Reset")
+	click(t, tt, "Earlier")
+	path := filepath.Join(t.TempDir(), "library.json")
+	if err := savePreferences(path, a.prefs); err != nil {
+		t.Fatal(err)
+	}
+	p, err := loadPreferences(path)
+	if err != nil || p.Tracks[0].LyricOffsetMS != -100 || p.Tracks[1].LyricOffsetMS != 0 {
+		t.Fatal(p, err)
 	}
 }
 
@@ -472,6 +613,7 @@ func TestCaptureUI(t *testing.T) {
 			b.lyricsPath = b.prefs.Current
 			b.lyrics = parseLyrics("[01:10.00]A little room for the music\n[01:18.00]Let the needle find its way\n[01:23.00]<01:23.00>Every <01:23.40>word <01:23.80>has <01:24.20>its <01:24.60>own <01:25.00>rhythm\n[01:30.00]And the evening drifts away\n[01:38.00]One more song before the morning\n[01:45.00]One more moment here to stay")
 			b.lyricMode = "Words"
+			b.lyrics.Source = "C:/Music/Tycho/Dive/02. A Walk.elrc"
 			b.status.Position = 83*time.Second + 600*time.Millisecond
 			if state.name == "song-compact" {
 				w, h = 820, 580
@@ -479,6 +621,51 @@ func TestCaptureUI(t *testing.T) {
 		}
 		tt := ui.NewTester(b.view, w, h)
 		f, err := os.Create(filepath.Join(dir, state.name+".png"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = png.Encode(f, tt.Image())
+		f.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, size := range [][2]int{{260, 180}, {360, 210}, {640, 180}, {820, 210}, {260, 340}, {420, 600}, {640, 340}, {900, 500}} {
+		b := newApp(a.prefs, "")
+		defer b.cancel()
+		b.mini = true
+		b.status, b.seek = a.status, a.seek
+		b.prefs.Tracks[1].Title = "A long song title that should fit gracefully at every size"
+		tt := ui.NewTester(b.view, size[0], size[1])
+		f, err := os.Create(filepath.Join(dir, fmt.Sprintf("mini-%dx%d.png", size[0], size[1])))
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = png.Encode(f, tt.Image())
+		f.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, name := range []string{"folders-expanded", "lyric-timing"} {
+		b := newApp(a.prefs, "")
+		defer b.cancel()
+		b.status, b.seek = a.status, a.seek
+		if name == "folders-expanded" {
+			b.prefs.Folders = nil
+			for i := range 200 {
+				b.prefs.Folders = append(b.prefs.Folders, fmt.Sprintf("C:/Music/Collection %03d — a long folder name", i))
+			}
+			b.settings, b.foldersOpen = true, true
+		} else {
+			b.songScreen, b.lyricTimingOpen = true, true
+			b.lyricsPath = b.prefs.Current
+			b.lyrics = parseLyrics("[01:10]The first line\n[01:23]The current line\n[01:30]The next line")
+			b.lyricMode = "Timed"
+		}
+		tt := ui.NewTester(b.view, 820, 580)
+		tt.Advance(300 * time.Millisecond)
+		f, err := os.Create(filepath.Join(dir, name+".png"))
 		if err != nil {
 			t.Fatal(err)
 		}

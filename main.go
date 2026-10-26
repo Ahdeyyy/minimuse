@@ -79,7 +79,7 @@ func main() {
 		mygo.Theme.SetSource(source)
 		bg := "#f1f3f8"
 		if a.prefs.Dark {
-			bg = "#111521"
+			bg = "#08090f"
 		}
 		a.visible = !*startInTray
 		a.window = mygo.NewWindow(mygo.WindowOptions{Title: "MiniMuse", Width: 1080, Height: 740, MinWidth: 820, MinHeight: 580, StateKey: "main", Content: ui.View(a.view), BackgroundColor: bg, Hidden: *startInTray, TitleBarStyle: mygo.TitleBarHidden, HideWindowButtons: true, TitleBarHeight: 42})
