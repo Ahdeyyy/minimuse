@@ -1,0 +1,9 @@
+{
+  "name": "MiniMuse",
+  "identifier": "app.minimuse.player",
+  "version": "0.1.0",
+  "out": "build",
+  "fileAssociations": [
+    { "ext": ["mp3", "flac", "wav", "ogg", "oga"], "name": "Music", "role": "Viewer" }
+  ]
+}
