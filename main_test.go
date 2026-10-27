@@ -20,6 +20,9 @@ type fakeEngine struct {
 	seeks          []time.Duration
 	volume         float64
 	crossfade      time.Duration
+	snapshot       audio.Status
+	closeSnapshot  *audio.Status
+	restores       []audio.Status
 	toggles, stops int
 }
 
@@ -29,8 +32,16 @@ func (f *fakeEngine) Stop()                     { f.stops++ }
 func (f *fakeEngine) Seek(d time.Duration)      { f.seeks = append(f.seeks, d) }
 func (f *fakeEngine) Volume(v float64)          { f.volume = v }
 func (f *fakeEngine) Crossfade(d time.Duration) { f.crossfade = d }
-func (f *fakeEngine) Snapshot() audio.Status    { return audio.Status{} }
-func (f *fakeEngine) Close()                    {}
+func (f *fakeEngine) Snapshot() audio.Status    { return f.snapshot }
+func (f *fakeEngine) Close() {
+	if f.closeSnapshot != nil {
+		f.snapshot = *f.closeSnapshot
+	}
+}
+func (f *fakeEngine) Restore(path string, position time.Duration, playing bool) bool {
+	f.restores = append(f.restores, audio.Status{Path: path, Position: position, Playing: playing})
+	return true
+}
 
 func testApp(t testing.TB, n int) *app {
 	t.Helper()
@@ -364,6 +375,7 @@ func TestSongScreenLyricsModesAndNavigation(t *testing.T) {
 					t.Errorf("%dx%d %s out of bounds: %+v", size[0], size[1], label, r)
 				}
 			}
+			click(t, tt, "Timed")
 			click(t, tt, "Lyric line 1")
 			if !slices.Equal(a.engine.(*fakeEngine).seeks, []time.Duration{time.Second}) {
 				t.Fatal("lyric line seek failed")
@@ -499,6 +511,7 @@ func TestLyricTimingControls(t *testing.T) {
 		t.Fatal("delay should apply to line and word playback", a.lyricOffset(), a.lyricPosition(), a.lyricActive)
 	}
 	tt.Key(0, ui.KeyEscape)
+	click(t, tt, "Timed")
 	click(t, tt, "Lyric line 1")
 	if got := a.engine.(*fakeEngine).seeks; !slices.Equal(got, []time.Duration{1500 * time.Millisecond}) {
 		t.Fatal("line seeking did not include the timing offset", got)

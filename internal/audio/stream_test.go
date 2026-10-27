@@ -300,4 +300,30 @@ func TestRealDeviceLifecycle(t *testing.T) {
 		e.Stop()
 		wait(func(s Status) bool { return !s.Playing })
 	}
+	// Restoring must seek before the first Play, and paused restores must not
+	// consume samples. Closing must finish queued seeks before saving position.
+	path, _ = writeFLAC(t, false, 64)
+	if !e.Restore(path, time.Second, false) {
+		t.Fatal("restore rejected")
+	}
+	restored := wait(func(s Status) bool { return s.Path == path && !s.Playing && s.Position == time.Second })
+	time.Sleep(150 * time.Millisecond)
+	if e.Snapshot().Position != restored.Position {
+		t.Fatal("paused restore advanced")
+	}
+	e.Toggle()
+	wait(func(s Status) bool { return s.Playing && s.Position > time.Second })
+	if !e.Restore(path, 2*time.Second, true) {
+		t.Fatal("playing restore rejected")
+	}
+	wait(func(s Status) bool { return s.Playing && s.Position >= 2*time.Second })
+	e.Seek(1500 * time.Millisecond)
+	e.Close()
+	final := e.Snapshot()
+	if final.Path != path || !final.Playing || final.Position < 1500*time.Millisecond || final.Position > 1700*time.Millisecond {
+		t.Fatal("close lost the final playback position or state", final)
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal("close retained the restored decoder", err)
+	}
 }

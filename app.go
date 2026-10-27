@@ -18,6 +18,7 @@ import (
 
 type playbackEngine interface {
 	Load(string) bool
+	Restore(string, time.Duration, bool) bool
 	Toggle()
 	Stop()
 	Seek(time.Duration)
@@ -56,6 +57,8 @@ type app struct {
 	visibleAlbums    []int
 	albumKey         string
 	albumList        ui.ListState
+	albumTracks      ui.ListState
+	albumSelected    int
 	mini             bool
 	miniVolumeOpen   bool
 	mainBounds       mygo.Rectangle
@@ -85,6 +88,8 @@ type app struct {
 	lyricsGeneration uint64
 	lyricMode        string
 	lyricList        ui.ListState
+	lyricScroll      ui.ScrollState
+	lyricRows        []ui.Handle
 	lyricActive      int
 	followLyrics     bool
 	lyricTimingOpen  bool
@@ -97,6 +102,8 @@ func newApp(p preferences, path string) *app {
 	ctx, cancel := context.WithCancel(context.Background())
 	a := &app{prefs: p, path: path, ctx: ctx, cancel: cancel, section: "All songs", selected: -1, queuePos: -1, visible: true, pulse: make(chan time.Duration, 1)}
 	a.list.Selected = &a.selected
+	a.albumSelected = -1
+	a.albumTracks.Selected = &a.albumSelected
 	a.art = make(map[string]*artEntry)
 	a.artJobs = make(chan track, 64)
 	a.lyricActive = -1
@@ -190,7 +197,7 @@ func (a *app) updatePulse() {
 	if a.visible && !a.minimized && a.status.Playing {
 		interval = time.Second
 		if a.songScreen && !a.mini && a.lyrics.Timed && a.lyricMode != "Static" {
-			interval = 80 * time.Millisecond
+			interval = time.Second / 60
 		}
 	}
 	select {
@@ -255,6 +262,7 @@ func (a *app) reindex() {
 func (a *app) refreshFilter() {
 	a.filtered = a.filtered[:0]
 	a.selected = -1
+	a.albumSelected = -1
 	q := strings.ToLower(strings.TrimSpace(a.query))
 	if a.section == "Albums" {
 		a.filterAlbums(q)
@@ -414,6 +422,8 @@ func (a *app) play(path string) {
 		return
 	}
 	a.prefs.Current = path
+	a.prefs.Position = 0
+	a.prefs.Playing = true
 	a.status = audio.Status{Path: path}
 	a.seek = 0
 	a.updatePulse()
@@ -425,6 +435,39 @@ func (a *app) play(path string) {
 	a.queuePos = slices.Index(a.prefs.Queue, path)
 	a.notice = ""
 	a.persist()
+}
+
+// Restore in one engine command so no samples from the start of the song are
+// played before the saved position is applied. Paused sessions stay paused.
+func (a *app) restorePlayback() {
+	t := a.current()
+	if t == nil || a.engine == nil {
+		return
+	}
+	position := max(0, a.prefs.Position)
+	if t.Duration > 0 && position >= t.Duration {
+		position = 0
+	}
+	if !a.engine.Restore(t.Path, position, a.prefs.Playing) {
+		a.notice = "Player is busy. Try again in a moment."
+		return
+	}
+	a.prefs.Position = position
+	a.status = audio.Status{Path: t.Path, Position: position, Duration: t.Duration, Playing: a.prefs.Playing}
+	a.seek = position.Seconds()
+	a.updatePulse()
+}
+
+func (a *app) rememberPlayback(s audio.Status) {
+	if s.Path == "" || s.Path != a.prefs.Current || s.Error != "" {
+		return
+	}
+	a.prefs.Position = max(0, s.Position)
+	a.prefs.Playing = s.Playing
+	if s.Ended {
+		a.prefs.Position = 0
+		a.prefs.Playing = false
+	}
 }
 
 func (a *app) playFrom(i int) {
@@ -468,6 +511,8 @@ func (a *app) acceptStatus(s audio.Status) {
 	}
 	a.status = s
 	a.seek = s.Position.Seconds()
+	a.rememberPlayback(s)
+	a.persist()
 	a.updatePulse()
 	if s.Error != "" {
 		a.notice = "Playback stopped: " + s.Error
@@ -639,6 +684,8 @@ func (a *app) remove(path string, library bool) {
 			a.engine.Stop()
 		}
 		a.prefs.Current = ""
+		a.prefs.Position = 0
+		a.prefs.Playing = false
 		a.clearLyrics()
 		a.status = audio.Status{}
 		a.updatePulse()

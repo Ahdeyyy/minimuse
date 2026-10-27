@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -149,5 +150,59 @@ func TestLyricsPolishLayoutAndMotion(t *testing.T) {
 		tt.Advance(time.Second)
 		click(t, tt, "Words")
 		tt.Advance(time.Second)
+	}
+}
+
+func TestWordLyricSeeking(t *testing.T) {
+	for _, width := range []int{820, 1440} {
+		a := testApp(t, 1)
+		a.playFrom(0)
+		a.songScreen = true
+		a.lyricsPath = a.prefs.Current
+		a.lyrics = parseLyrics("[00:01]<00:01>Hello <00:01.5>world <00:02>Hello<00:02.5>\n[00:03]Next line")
+		a.lyricMode = "Words"
+		a.status.Position = 1200 * time.Millisecond
+		a.status.Duration = 4 * time.Second
+		a.current().LyricOffsetMS = 250
+		tt := ui.NewTester(a.view, width, 740)
+		f := a.engine.(*fakeEngine)
+		// Repeated words have distinct identities, and a word click must
+		// seek once without also triggering the surrounding line button.
+		for _, word := range []string{"Lyric line 1 word 1", "Lyric line 1 word 2", "Lyric line 1 word 3"} {
+			click(t, tt, word)
+		}
+		if want := []time.Duration{1250 * time.Millisecond, 1750 * time.Millisecond, 2250 * time.Millisecond}; !slices.Equal(f.seeks, want) {
+			t.Fatalf("%d: word seeking: got %v, want %v", width, f.seeks, want)
+		}
+		r, _ := tt.Find("Lyric line 1 word 2")
+		tt.Move(r.X+r.W/2, r.Y+r.H/2)
+		tt.Advance(time.Second)
+		if tt.HasText("Seek to this line") {
+			t.Fatal("lyric seek tooltip is still visible")
+		}
+		a.current().LyricOffsetMS = -2000
+		tt.Frame()
+		click(t, tt, "Lyric line 1 word 2")
+		if f.seeks[len(f.seeks)-1] != 0 {
+			t.Fatal("word seek did not clamp at the beginning", f.seeks)
+		}
+		a.current().LyricOffsetMS = 4000
+		tt.Frame()
+		click(t, tt, "Lyric line 1 word 2")
+		if f.seeks[len(f.seeks)-1] != a.status.Duration {
+			t.Fatal("word seek exceeded the song duration", f.seeks)
+		}
+		click(t, tt, "Static")
+		before := len(f.seeks)
+		click(t, tt, "Lyric line 1")
+		if len(f.seeks) != before {
+			t.Fatal("static lyrics should not seek")
+		}
+		click(t, tt, "Words")
+		tt.Advance(time.Second)
+		click(t, tt, "Lyric line 1 word 3")
+		if len(f.seeks) != before+1 {
+			t.Fatal("word seeking did not return after changing modes")
+		}
 	}
 }

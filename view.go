@@ -10,13 +10,17 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
+func (a *app) searchVisible() bool {
+	return !a.mini && !a.songScreen && !a.settings && !a.playlistDialog
+}
+
 func (a *app) view(c *ui.Context) {
 	c.SetTheme(a.theme)
 	t := c.Theme()
 	c.Root().Background(t.Background)
 	c.OnShortcut(ui.Ctrl, ui.KeyO, func() { a.browse(false) })
-	if !a.mini {
-		c.OnShortcut(ui.Ctrl, ui.KeyF, func() { a.songScreen = false; a.updatePulse(); a.searchHandle.Focus(c) })
+	if a.searchVisible() {
+		c.OnShortcut(ui.Ctrl, ui.KeyF, func() { a.searchHandle.Focus(c) })
 	}
 	c.OnShortcut(ui.Ctrl, ui.KeyM, func() { a.setMini(!a.mini) })
 	c.OnShortcut(ui.Ctrl, ui.KeyR, a.refreshFolders)
@@ -56,7 +60,9 @@ func (a *app) view(c *ui.Context) {
 				iconButton(c, "close", "Dismiss message", false).Size(22, 22).OnClick(func() { a.notice = "" })
 			})
 		}
-		a.transport(c, w)
+		ui.Row(c).FillWidth().Shrink(0).Padding(0, 16, 20, 16).Justify(ui.Center).Children(func() {
+			a.transport(c, min(1200, w-32))
+		})
 	})
 	a.settingsDialog(c)
 	a.savePlaylistDialog(c)
@@ -105,9 +111,12 @@ func (a *app) sidebar(c *ui.Context) {
 				if len(a.prefs.Playlists) == 0 {
 					ui.Text(c, "No playlists").FontSize(10).TextColor(t.TextMuted).Padding(4, 12)
 				} else {
-					ui.List(c.Key("playlists"), &a.playlistList, len(a.prefs.Playlists)).FillWidth().Padding(0, 16, 0, 0).Height(float32(min(160, max(42, len(a.prefs.Playlists)*42)))).ItemKey(func(i int) any { return a.prefs.Playlists[i].Name }).Rows(func(row ui.ListRow) {
+					// Menu actions can delete items during construction. Keep the row
+					// count, keys and names stable through this build and its layout.
+					playlists := slices.Clone(a.prefs.Playlists)
+					ui.List(c.Key("playlists"), &a.playlistList, len(playlists)).FillWidth().Padding(0, 16, 0, 0).Height(float32(min(160, max(42, len(playlists)*42)))).ItemKey(func(i int) any { return playlists[i].Name }).Rows(func(row ui.ListRow) {
 						c := row.Context
-						name := a.prefs.Playlists[row.Index].Name
+						name := playlists[row.Index].Name
 						b := ui.Button(c, "").Label(name).Tooltip(name).FillWidth().Padding(9, 12).Gap(8).AlignItems(ui.Center).Background(ui.Transparent).Border(0, ui.Transparent)
 						b.Children(func() {
 							ui.Icon(c, icons["music"]).Size(16, 16).Shrink(0)
@@ -143,6 +152,12 @@ func (a *app) sidebar(c *ui.Context) {
 }
 
 func (a *app) libraryView(c *ui.Context, width float32) {
+	if a.section == "Albums" {
+		if i, ok := a.albumIndex[a.albumKey]; ok {
+			a.albumDetail(c, width, a.albums[i])
+			return
+		}
+	}
 	t := c.Theme()
 	section := strings.TrimPrefix(a.section, "playlist:")
 	subtitle := songCount(len(a.filtered))
@@ -154,18 +169,8 @@ func (a *app) libraryView(c *ui.Context, width float32) {
 		}
 		subtitle = fmt.Sprintf("%d %s", len(a.visibleAlbums), word)
 	}
-	if a.section == "Albums" && a.albumKey != "" {
-		if i, ok := a.albumIndex[a.albumKey]; ok {
-			g := a.albums[i]
-			section = g.Title
-			subtitle = g.Artist + " · " + subtitle
-		}
-	}
 	ui.Column(c).FillWidth().Padding(24, 24, 18, 24).Gap(16).Children(func() {
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(12).Children(func() {
-			if a.section == "Albums" && a.albumKey != "" {
-				iconButton(c, "back", "Back to albums", false).OnClick(func() { a.albumKey = ""; a.query = ""; a.refreshFilter() })
-			}
 			ui.Column(c).Grow(1).MinWidth(0).Gap(5).Children(func() {
 				ui.Text(c, section).FontSize(25).Bold().SingleLine()
 				ui.Text(c, subtitle).FontSize(11).TextColor(t.TextMuted).SingleLine()
@@ -174,14 +179,6 @@ func (a *app) libraryView(c *ui.Context, width float32) {
 			if a.section == "Queue" {
 				iconButton(c, "plus", "Save queue as playlist", false).Disabled(len(a.prefs.Queue) == 0).OnClick(func() { a.playlistDialog = true })
 			}
-		})
-		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(8).Children(func() {
-			ui.Icon(c, icons["search"]).Size(17, 17).TextColor(t.TextMuted)
-			placeholder := "Search songs, artists, albums…"
-			if albumOverview {
-				placeholder = "Search albums or artists…"
-			}
-			ui.TextInput(c.Key("search"), &a.query).Bind(&a.searchHandle).Label("Search music").Placeholder(placeholder).FillWidth().OnChange(a.refreshFilter)
 		})
 	})
 	if albumOverview {
@@ -192,57 +189,10 @@ func (a *app) libraryView(c *ui.Context, width float32) {
 		a.emptyView(c)
 		return
 	}
-	ui.Row(c).FillWidth().Height(32).Padding(0, 40, 0, 24).Gap(12).AlignItems(ui.Center).Background(t.Background.Alpha(.6)).Children(func() {
-		ui.Text(c, "#").Width(20).FontSize(10).TextColor(t.TextMuted)
-		ui.Text(c, "TITLE / ARTIST").Width(0).Grow(1).FontSize(10).TextColor(t.TextMuted)
-		if width >= 1000 {
-			ui.Text(c, "ALBUM").Width(125).FontSize(10).TextColor(t.TextMuted)
-		}
-		ui.Text(c, "FORMAT").Width(49).FontSize(10).TextColor(t.TextMuted)
-		ui.Text(c, "TIME").Width(46).FontSize(10).TextColor(t.TextMuted).TextAlign(ui.End)
-		ui.Spacer(c).Width(68).Grow(0).Shrink(0)
-	})
+	a.songTableHeader(c, width)
 	ui.List(c.Key(a.section), &a.list, len(a.filtered)).FillWidth().Grow(1).MinHeight(0).Padding(8, 28, 8, 12).
 		ItemKey(func(i int) any { return a.prefs.Tracks[a.filtered[i]].Path }).Rows(func(row ui.ListRow) {
-		c := row.Context
-		i := row.Index
-		tr := a.prefs.Tracks[a.filtered[i]]
-		current := tr.Path == a.prefs.Current
-		e := ui.Row(c).FillWidth().Height(62).Padding(8, 12).Gap(12).AlignItems(ui.Center).Radius(8).TextColor(t.Text)
-		if row.Selected() {
-			e.Background(t.Selection)
-		} else if current {
-			e.Background(t.Background)
-		} else if e.Hovered() {
-			e.Background(t.SurfaceHover)
-		}
-		e.Children(func() {
-			if current {
-				ui.Icon(c, icons["music"]).Size(16, 16).Width(20).TextColor(t.Accent)
-			} else {
-				ui.Textf(c, "%02d", i+1).Width(20).FontSize(11).TextColor(t.TextMuted)
-			}
-			ui.Image(c, a.coverFor(&tr)).Size(38, 38).Radius(5).Clip().Shrink(0)
-			ui.Column(c).Grow(1).MinWidth(0).Gap(5).Children(func() {
-				color := t.Text
-				ui.Text(c, tr.Title).FontSize(13).Bold().TextColor(color).SingleLine().Tooltip(tr.Title)
-				ui.Text(c, tr.Artist).FontSize(11).TextColor(t.TextMuted).SingleLine()
-			})
-			if width >= 1000 {
-				ui.Text(c, tr.Album).Width(125).FontSize(11).TextColor(t.TextMuted).SingleLine()
-			}
-			ui.Text(c, codec(tr.Path)).Width(49).FontSize(9).TextColor(t.TextMuted)
-			duration := "—"
-			if tr.Duration > 0 {
-				duration = clockTime(tr.Duration)
-			}
-			ui.Text(c, duration).Width(46).FontSize(11).TextColor(t.TextMuted).TextAlign(ui.End).Label("Duration of " + tr.Title)
-			iconButton(c, "heart", "Favorite "+tr.Title, tr.Favorite).Size(28, 28).OnClick(func() { a.favorite(tr.Path) })
-			iconButton(c, "more", "Actions for "+tr.Title, false).Size(28, 28).Menu(func(m *ui.Menu) { a.trackMenu(m, tr.Path, i) })
-		})
-		if current && a.status.Path == tr.Path && !a.status.Ended && a.status.Error == "" {
-			e.OnClick(a.openSong)
-		}
+		a.songRow(row.Context, row.Index, row.Selected(), width)
 	}).OnSubmit(func() {
 		if a.selected >= 0 {
 			if a.prefs.Tracks[a.filtered[a.selected]].Path == a.prefs.Current && a.status.Path == a.prefs.Current && !a.status.Ended && a.status.Error == "" {
@@ -255,6 +205,61 @@ func (a *app) libraryView(c *ui.Context, width float32) {
 	ui.Row(c).FillWidth().Height(38).Padding(0, 24).AlignItems(ui.Center).Children(func() {
 		ui.Text(c, "Double-click a song to play").FontSize(10).TextColor(t.TextMuted)
 	})
+}
+
+func (a *app) songTableHeader(c *ui.Context, width float32) {
+	t := c.Theme()
+	ui.Row(c).FillWidth().Height(32).Padding(0, 40, 0, 24).Gap(12).AlignItems(ui.Center).Background(t.Background.Alpha(.6)).Children(func() {
+		ui.Text(c, "#").Width(20).FontSize(10).TextColor(t.TextMuted)
+		ui.Text(c, "TITLE / ARTIST").Width(0).Grow(1).FontSize(10).TextColor(t.TextMuted)
+		if width >= 1000 {
+			ui.Text(c, "ALBUM").Width(125).FontSize(10).TextColor(t.TextMuted)
+		}
+		ui.Text(c, "FORMAT").Width(49).FontSize(10).TextColor(t.TextMuted)
+		ui.Text(c, "TIME").Width(46).FontSize(10).TextColor(t.TextMuted).TextAlign(ui.End)
+		ui.Spacer(c).Width(68).Grow(0).Shrink(0)
+	})
+}
+
+func (a *app) songRow(c *ui.Context, i int, selected bool, width float32) {
+	t := c.Theme()
+	tr := a.prefs.Tracks[a.filtered[i]]
+	current := tr.Path == a.prefs.Current
+	e := ui.Row(c).FillWidth().Height(62).Padding(8, 12).Gap(12).AlignItems(ui.Center).Radius(8).TextColor(t.Text)
+	if selected {
+		e.Background(t.Selection)
+	} else if current {
+		e.Background(t.Background)
+	} else if e.Hovered() {
+		e.Background(t.SurfaceHover)
+	}
+	e.Children(func() {
+		if current {
+			ui.Icon(c, icons["music"]).Size(16, 16).Width(20).TextColor(t.Accent)
+		} else {
+			ui.Textf(c, "%02d", i+1).Width(20).FontSize(11).TextColor(t.TextMuted)
+		}
+		ui.Image(c, a.coverFor(&tr)).Size(38, 38).Radius(5).Clip().Shrink(0)
+		ui.Column(c).Grow(1).MinWidth(0).Gap(5).Children(func() {
+			color := t.Text
+			ui.Text(c, tr.Title).FontSize(13).Bold().TextColor(color).SingleLine().Tooltip(tr.Title)
+			ui.Text(c, tr.Artist).FontSize(11).TextColor(t.TextMuted).SingleLine()
+		})
+		if width >= 1000 {
+			ui.Text(c, tr.Album).Width(125).FontSize(11).TextColor(t.TextMuted).SingleLine()
+		}
+		ui.Text(c, codec(tr.Path)).Width(49).FontSize(9).TextColor(t.TextMuted)
+		duration := "—"
+		if tr.Duration > 0 {
+			duration = clockTime(tr.Duration)
+		}
+		ui.Text(c, duration).Width(46).FontSize(11).TextColor(t.TextMuted).TextAlign(ui.End).Label("Duration of " + tr.Title)
+		iconButton(c, "heart", "Favorite "+tr.Title, tr.Favorite).Size(28, 28).OnClick(func() { a.favorite(tr.Path) })
+		iconButton(c, "more", "Actions for "+tr.Title, false).Size(28, 28).Menu(func(m *ui.Menu) { a.trackMenu(m, tr.Path, i) })
+	})
+	if current && a.status.Path == tr.Path && !a.status.Ended && a.status.Error == "" {
+		e.OnClick(a.openSong)
+	}
 }
 
 func (a *app) emptyView(c *ui.Context) {
@@ -284,8 +289,8 @@ func (a *app) emptyView(c *ui.Context) {
 func (a *app) transport(c *ui.Context, width float32) {
 	t := c.Theme()
 	tr := a.current()
-	ui.Row(c).FillWidth().Height(112).Padding(14, 24).Gap(24).AlignItems(ui.Center).Background(t.Surface).Border(1, t.Border.Alpha(.65)).Children(func() {
-		b := ui.Button(c, "").Label("Open song screen").Tooltip("Open currently playing song · Ctrl+L").Width(min(360, max(216, width*.28))).Shrink(0).Padding(0).Gap(12).AlignItems(ui.Center).Background(ui.Transparent).Border(0, ui.Transparent).Disabled(tr == nil)
+	ui.Row(c.Key("transport")).Label("Playback controls").Width(width).Height(100).Shrink(0).Padding(12, 20).Gap(20).AlignItems(ui.Center).Background(t.Surface).Radius(16).Border(1, t.Border.Alpha(.65)).Shadow(0, 5, 18, 0, ui.RGBA(0, 0, 0, .08)).Children(func() {
+		b := ui.Button(c, "").Label("Open song screen").Tooltip("Open currently playing song · Ctrl+L").Width(min(280, max(184, width*.25))).Shrink(0).Padding(0).Gap(12).AlignItems(ui.Center).Background(ui.Transparent).Border(0, ui.Transparent).Disabled(tr == nil)
 		b.Children(func() {
 			ui.Image(c, a.coverFor(tr)).Size(46, 46).Radius(7).Clip().Shrink(0)
 			ui.Column(c).Width(0).Grow(1).MinWidth(0).Gap(6).Children(func() {
@@ -302,7 +307,7 @@ func (a *app) transport(c *ui.Context, width float32) {
 			ui.Row(c).FillWidth().Justify(ui.Center).Gap(10).AlignItems(ui.Center).Children(func() { a.playbackButtons(c) })
 			a.seekControl(c)
 		})
-		a.volumeControl(c, 126)
+		a.volumeControl(c, 110)
 		iconButton(c, "mini", "Mini player", false).OnClick(func() { a.setMini(true) })
 	})
 }
@@ -455,9 +460,9 @@ func (a *app) toggleTheme() {
 
 func (a *app) settingsDialog(c *ui.Context) {
 	ui.DialogBase(c.Key("settings"), &a.settings, func(backdrop, panel ui.Element) {
-		_, height := c.Size()
+		width, height := c.Size()
 		backdrop.Background(ui.RGBA(0, 0, 0, .2))
-		panel.Width(460).MaxHeight(height-32).Padding(24).Gap(16).Radius(12).Background(c.Theme().Surface).Border(1, c.Theme().Border)
+		panel.Label("Settings dialog").Width(min(640, width-48)).MaxHeight(height-32).Padding(24).Gap(16).Radius(12).Background(c.Theme().Surface).Border(1, c.Theme().Border)
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Children(func() {
 			ui.Text(c, "Settings").FontSize(20).Bold()
 			ui.Spacer(c).Grow(1)

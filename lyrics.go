@@ -22,14 +22,18 @@ import (
 )
 
 type lyricWord struct {
-	At   time.Duration
-	Text string
+	At, End time.Duration
+	Text    string
 }
 type lyricLine struct {
-	At    time.Duration
-	Text  string
-	Words []lyricWord
+	At, End    time.Duration
+	Text       string
+	Words      []lyricWord
+	Background bool
 }
+
+const lyricOpenEnd = time.Duration(1<<63 - 1)
+
 type lyricDocument struct {
 	Lines            []lyricLine
 	Timed, WordTimed bool
@@ -66,7 +70,13 @@ func parseLyrics(text string) lyricDocument {
 	var offset time.Duration
 	for _, raw := range strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n") {
 		raw = strings.TrimSpace(raw)
-		if meta := lyricMeta.FindStringSubmatch(raw); meta != nil {
+		background := strings.HasPrefix(strings.ToLower(raw), "[bg:") && strings.HasSuffix(raw, "]")
+		if background {
+			// Backing vocals carry their own inline timing, without a leading
+			// line stamp. Keep them as independently timed lyric lines.
+			raw = strings.TrimSpace(raw[4 : len(raw)-1])
+		}
+		if meta := lyricMeta.FindStringSubmatch(raw); !background && meta != nil {
 			if strings.EqualFold(meta[1], "offset") {
 				if n, err := strconv.Atoi(strings.TrimSpace(meta[2])); err == nil {
 					offset = time.Duration(n) * time.Millisecond
@@ -75,12 +85,19 @@ func parseLyrics(text string) lyricDocument {
 			continue
 		}
 		stamps := lyricStamp.FindAllStringSubmatchIndex(raw, -1)
-		if len(stamps) == 0 || stamps[0][0] != 0 {
+		if !background && (len(stamps) == 0 || stamps[0][0] != 0) {
 			plain = append(plain, lyricLine{Text: raw})
 			continue
 		}
 		end := 0
 		var times []time.Duration
+		if background {
+			if first := wordStamp.FindStringSubmatch(raw); first != nil {
+				if at, ok := parseLyricTime(first[1]); ok {
+					times = append(times, at)
+				}
+			}
+		}
 		for _, match := range stamps {
 			if match[0] != end {
 				break
@@ -116,7 +133,7 @@ func parseLyrics(text string) lyricDocument {
 			body = wordStamp.ReplaceAllString(body, "")
 		}
 		for _, at := range times {
-			line := lyricLine{At: at, Text: body}
+			line := lyricLine{At: at, End: lyricOpenEnd, Text: body, Background: background}
 			for _, w := range words {
 				w.At += at - times[0]
 				line.Words = append(line.Words, w)
@@ -131,8 +148,24 @@ func parseLyrics(text string) lyricDocument {
 	for i := range d.Lines {
 		line := &d.Lines[i]
 		line.At = max(0, line.At+offset)
+		// Resolve word intervals before clamping offsets: sequential words
+		// shifted before zero must not become a simultaneous vocal at zero.
+		for j := len(line.Words) - 1; j >= 0; j-- {
+			w := &line.Words[j]
+			w.End = lyricOpenEnd
+			if j+1 < len(line.Words) {
+				next := line.Words[j+1]
+				w.End = next.End
+				if next.At > w.At {
+					w.End = next.At
+				}
+			}
+		}
 		for j := range line.Words {
 			line.Words[j].At = max(0, line.Words[j].At+offset)
+			if line.Words[j].End != lyricOpenEnd {
+				line.Words[j].End = max(0, line.Words[j].End+offset)
+			}
 		}
 		if len(line.Words) > 0 {
 			d.WordTimed = true
@@ -148,6 +181,36 @@ func parseLyrics(text string) lyricDocument {
 			}
 			return 0
 		})
+		var foreground []time.Duration
+		for _, line := range d.Lines {
+			if !line.Background {
+				foreground = append(foreground, line.At)
+			}
+		}
+		for i := range d.Lines {
+			line := &d.Lines[i]
+			if n := len(line.Words); n > 0 && strings.TrimSpace(line.Words[n-1].Text) == "" {
+				// A trailing empty stamp is an explicit release, even when
+				// another vocal has already started on a different line.
+				line.End = line.Words[n-1].At
+				continue
+			}
+			last := line.At
+			for _, w := range line.Words {
+				last = max(last, w.At)
+			}
+			// Without a release stamp, keep the usual next-line boundary.
+			// Never cut off known words or let a backing vocal end the lead.
+			next, _ := slices.BinarySearchFunc(foreground, last, func(at, last time.Duration) int {
+				if at <= last {
+					return -1
+				}
+				return 1
+			})
+			if next < len(foreground) {
+				line.End = foreground[next]
+			}
+		}
 	}
 	for len(d.Lines) > 0 && d.Lines[len(d.Lines)-1].Text == "" && !d.Timed {
 		d.Lines = d.Lines[:len(d.Lines)-1]
@@ -165,7 +228,22 @@ func (d lyricDocument) active(position time.Duration) int {
 		}
 		return 1
 	})
+	// Follow the lead vocal while backing lines highlight independently.
+	for j := i - 1; j >= 0; j-- {
+		if !d.Lines[j].Background {
+			return j
+		}
+	}
 	return i - 1
+}
+
+func (line lyricLine) singing(position time.Duration) bool {
+	return line.At <= position && position < line.End
+}
+
+func (line lyricLine) wordActive(index int, position time.Duration) bool {
+	w := line.Words[index]
+	return line.singing(position) && w.At <= position && position < w.End && strings.TrimSpace(w.Text) != ""
 }
 
 func decodeLyrics(b []byte) string {
@@ -298,6 +376,8 @@ func (a *app) clearLyrics() {
 	a.lyricsBusy = false
 	a.lyricActive = -1
 	a.lyricList = ui.ListState{}
+	a.lyricScroll = ui.ScrollState{}
+	a.lyricRows = nil
 	a.lyricTimingOpen = false
 }
 

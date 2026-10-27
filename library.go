@@ -301,6 +301,8 @@ type preferences struct {
 	Tracks           []track
 	Queue            []string
 	Current          string
+	Position         time.Duration
+	Playing          bool
 	Volume           float64
 	Shuffle          bool
 	Repeat           int // 0 off, 1 all, 2 one
@@ -324,6 +326,7 @@ func loadPreferences(path string) (preferences, error) {
 		return preferences{Volume: 80, CloseToTray: true, CrossfadeSeconds: 4}, fmt.Errorf("could not read saved library: %w", err)
 	}
 	p.Volume = max(0, min(100, p.Volume))
+	p.Position = max(0, p.Position)
 	p.CrossfadeSeconds = max(1, min(12, p.CrossfadeSeconds))
 	if p.Repeat < 0 || p.Repeat > 2 {
 		p.Repeat = 0

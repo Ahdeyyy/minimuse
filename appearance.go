@@ -100,6 +100,7 @@ var icons = func() map[string]*ui.SVG {
 		"back":     `<path d="m14 5-7 7 7 7"/>`,
 		"check":    `<path d="m5 12 4 4L19 6"/>`,
 		"follow":   `<path d="M5 4h14M5 20h14M12 7v10m-3-3 3 3 3-3"/>`,
+		"locate":   `<circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="1"/><path d="M12 2v4m0 12v4M2 12h4m12 0h4"/>`,
 	}
 	paths["repeat-one"] = paths["repeat"] + `<path d="m10 10 2-2v8m-2 0h4"/>`
 	paths["heart-filled"] = `<g fill="currentColor">` + paths["heart"] + `</g>`

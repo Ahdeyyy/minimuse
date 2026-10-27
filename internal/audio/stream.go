@@ -16,7 +16,6 @@ import (
 	nativeaudio "github.com/egoist/mygo/audio"
 	nativemp3 "github.com/egoist/mygo/audio/mp3"
 	"github.com/gopxl/beep/v2"
-	"github.com/gopxl/beep/v2/flac"
 	"github.com/gopxl/beep/v2/vorbis"
 )
 
@@ -38,7 +37,7 @@ func Decode(path string) (beep.StreamSeekCloser, beep.Format, error) {
 			s, format = adaptNative(f, d, 2)
 		}
 	case ".flac":
-		s, format, err = flac.Decode(f)
+		s, format, err = decodeFLAC(f)
 	case ".ogg", ".oga":
 		s, format, err = vorbis.Decode(f)
 	case ".wav":

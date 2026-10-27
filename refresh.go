@@ -51,6 +51,8 @@ func (a *app) pruneMissingMusic(folders, songs map[string]bool) {
 			a.engine.Stop()
 		}
 		a.prefs.Current = ""
+		a.prefs.Position = 0
+		a.prefs.Playing = false
 		a.status = audio.Status{}
 		a.seek = 0
 		a.clearLyrics()

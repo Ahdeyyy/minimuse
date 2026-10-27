@@ -88,8 +88,11 @@ func main() {
 		if *startInTray && a.tray == nil {
 			a.show()
 		}
-		if *startPlaying && len(flag.Args()) == 0 {
-			a.toggle()
+		if len(flag.Args()) == 0 {
+			a.restorePlayback()
+			if *startPlaying && !a.status.Playing {
+				a.toggle()
+			}
 		}
 		a.window.OnFileDrop(func(e *mygo.FileDropEvent) { a.importPaths(e.Paths) })
 		a.window.OnHide(func() { a.visible = false; a.updatePulse() })
@@ -167,13 +170,16 @@ func (a *app) shutdown() {
 	if a.volumeSave != nil {
 		a.volumeSave.Stop()
 	}
+	if a.engine != nil {
+		// Close drains pending commands and captures the final audible position
+		// before releasing the decoder, including while hidden in the tray.
+		a.engine.Close()
+		a.rememberPlayback(a.engine.Snapshot())
+	}
 	a.persist()
 	if a.saves != nil {
 		close(a.saves)
 		<-a.saved
-	}
-	if a.engine != nil {
-		a.engine.Close()
 	}
 	if a.tray != nil {
 		a.tray.Destroy()

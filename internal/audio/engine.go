@@ -21,9 +21,11 @@ type Status struct {
 }
 
 type command struct {
-	kind  string
-	path  string
-	value float64
+	kind     string
+	path     string
+	value    float64
+	position time.Duration
+	paused   bool
 }
 
 // Engine serializes all device and decoder operations on one worker. The UI
@@ -56,11 +58,14 @@ func (e *Engine) send(c command) bool {
 	}
 }
 func (e *Engine) Load(path string) bool { return e.send(command{kind: "load", path: path}) }
-func (e *Engine) Toggle()               { e.send(command{kind: "toggle"}) }
-func (e *Engine) Stop()                 { e.send(command{kind: "stop"}) }
-func (e *Engine) Seek(d time.Duration)  { e.send(command{kind: "seek", value: d.Seconds()}) }
-func (e *Engine) Volume(v float64)      { e.send(command{kind: "volume", value: max(0, min(1, v))}) }
-func (e *Engine) Snapshot() Status      { return *e.status.Load() }
+func (e *Engine) Restore(path string, position time.Duration, playing bool) bool {
+	return e.send(command{kind: "load", path: path, position: max(0, position), paused: !playing})
+}
+func (e *Engine) Toggle()              { e.send(command{kind: "toggle"}) }
+func (e *Engine) Stop()                { e.send(command{kind: "stop"}) }
+func (e *Engine) Seek(d time.Duration) { e.send(command{kind: "seek", value: d.Seconds()}) }
+func (e *Engine) Volume(v float64)     { e.send(command{kind: "volume", value: max(0, min(1, v))}) }
+func (e *Engine) Snapshot() Status     { return *e.status.Load() }
 
 // Crossfade sets the overlap duration. Zero disables it.
 func (e *Engine) Crossfade(d time.Duration) {
@@ -144,6 +149,10 @@ func (e *Engine) run() {
 		case c := <-e.commands:
 			switch c.kind {
 			case "close":
+				if player != nil {
+					player.PauseAndStopReading()
+				}
+				publish(false)
 				return
 			case "load":
 				publish(false)
@@ -154,7 +163,7 @@ func (e *Engine) run() {
 					outgoingGain = fadeProgress(state.Position, overlap)
 				}
 				releaseOutgoing()
-				if crossfade > 0 && player != nil && state.Playing && player.IsPlaying() {
+				if crossfade > 0 && !c.paused && c.position == 0 && player != nil && state.Playing && player.IsPlaying() {
 					outgoing, outgoingSource = player, source
 					overlap = min(crossfade, max(0, state.Duration-state.Position))
 					player, source = nil, nil
@@ -189,14 +198,30 @@ func (e *Engine) run() {
 					continue
 				}
 				state.Duration, state.SampleRate, state.Bits, state.Channels = source.duration(), int(f.SampleRate), f.Precision*8, f.NumChannels
+				if c.position > 0 {
+					position := c.position
+					if state.Duration > 0 && position >= state.Duration {
+						position = 0
+					}
+					if _, err = source.Seek(int64(position.Seconds()*OutputRate)*bytesPerFrame, io.SeekStart); err != nil {
+						release()
+						state.Error = fmt.Sprintf("restore: %v", err)
+						publish(true)
+						continue
+					}
+				}
 				overlap = min(overlap, state.Duration/2)
 				player = device.NewPlayer(source)
 				player.SetBufferSize(OutputRate * bytesPerFrame / 8) // 125 ms, 48 KB
 				applyVolume()
-				player.Play()
-				state.Playing = true
-				tick = timer.C
-				timer.Reset(40 * time.Millisecond)
+				if !c.paused {
+					player.Play()
+					state.Playing = true
+					tick = timer.C
+					timer.Reset(40 * time.Millisecond)
+				} else {
+					_ = device.Suspend()
+				}
 			case "toggle":
 				if player == nil {
 					continue

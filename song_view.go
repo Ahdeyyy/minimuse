@@ -3,19 +3,76 @@ package main
 import (
 	"fmt"
 	"math"
+	"strings"
 	"time"
 
 	"github.com/egoist/mygo/ui"
 )
 
+// Non-bouncing springs retain velocity when a new line or word arrives
+// before the previous transition has settled.
+var lyricLineMotion = ui.Animation{Spring: ui.SpringOptions{Duration: 650 * time.Millisecond}}
+var lyricWordMotion = ui.Animation{Spring: ui.SpringOptions{Duration: 280 * time.Millisecond}}
+
+func (a *app) stopLyricScroll() {
+	s := a.lyricScroll
+	a.lyricScroll = ui.ScrollState{Handle: s.Handle, X: s.X, Y: s.Y, MaxX: s.MaxX, MaxY: s.MaxY}
+}
+
+func (a *app) lyricFollowChanged() {
+	a.lyricActive = -1
+	if !a.followLyrics || a.lyricMode == "Static" {
+		a.stopLyricScroll()
+	}
+}
+
+func (a *app) scrollToLyric(c *ui.Context, active int) {
+	if active < 0 || active >= len(a.lyricRows) {
+		return
+	}
+	viewport := a.lyricScroll.Bounds(c)
+	line := a.lyricRows[active].Bounds(c)
+	first, last := a.lyricList.Visible()
+	if viewport.H > 0 && line.H > 0 && active >= first && active <= last {
+		// Measure the actual wrapped row, so long lines glide to the
+		// same center as short ones without changing their layout.
+		y := a.lyricScroll.Y + line.Y + line.H/2 - viewport.Y - viewport.H/2
+		a.lyricScroll.ScrollTo(0, y, lyricLineMotion)
+	} else {
+		// Distant jumps place the passage immediately instead of
+		// animating through unrelated verses.
+		a.stopLyricScroll()
+		a.lyricList.ScrollTo(active, ui.Center)
+	}
+}
+
 func (a *app) titlebar(c *ui.Context) {
 	t := c.Theme()
-	ui.Row(c.Key("titlebar")).FillWidth().Height(42).Shrink(0).AlignItems(ui.Center).Children(func() {
-		ui.Row(c).Grow(1).FillHeight().Padding(0, 18).Gap(8).AlignItems(ui.Center).DragWindow().Children(func() {
+	width, _ := c.Size()
+	ui.Row(c.Key("titlebar")).Label("Window title bar").FillWidth().Height(42).Shrink(0).AlignItems(ui.Center).Children(func() {
+		brand := ui.Row(c.Key("titlebar-brand")).Grow(1).FillHeight().Padding(0, 18).Gap(8).AlignItems(ui.Center).DragWindow()
+		if a.searchVisible() {
+			brand.Width(210).Grow(0).Shrink(0)
+		}
+		brand.Children(func() {
 			ui.Image(c, vinylLogo).Size(20, 20)
 			ui.Text(c, "MiniMuse").FontSize(11).Bold().TextColor(t.Text)
 		})
-		iconButton(c, "minimize", "Minimize window", false).Size(44, 42).Radius(0).OnClick(func() {
+		if a.searchVisible() {
+			placeholder := "Search songs, artists, albums…"
+			if a.section == "Albums" {
+				placeholder = "Search albums or artists…"
+				if _, ok := a.albumIndex[a.albumKey]; ok {
+					placeholder = "Search songs or artists in this album…"
+				}
+			}
+			ui.Row(c.Key("titlebar-search")).Width(min(float32(560), width-374)).Height(30).Padding(0, 10).Gap(8).AlignItems(ui.Center).Background(t.Surface).Border(1, t.Border).Radius(8).Children(func() {
+				ui.Icon(c, icons["search"]).Size(15, 15).TextColor(t.TextMuted)
+				ui.TextInput(c.Key("search"), &a.query).Bind(&a.searchHandle).Label("Search music").Placeholder(placeholder).Width(0).Grow(1).MinWidth(0).Height(28).Padding(0).FontSize(11).Background(ui.Transparent).Border(0, ui.Transparent).OnChange(a.refreshFilter)
+			})
+			ui.Box(c.Key("titlebar-drag-space")).Grow(1).FillHeight().DragWindow()
+		}
+		iconButton(c.Key("minimize"), "minimize", "Minimize window", false).Size(44, 42).Radius(0).OnClick(func() {
 			if a.window != nil {
 				a.window.Minimize()
 			}
@@ -25,13 +82,13 @@ func (a *app) titlebar(c *ui.Context) {
 			if a.window != nil && a.window.IsMaximized() {
 				name, label = "restore", "Restore window"
 			}
-			iconButton(c, name, label, false).Size(44, 42).Radius(0).OnClick(func() {
+			iconButton(c.Key("maximize"), name, label, false).Size(44, 42).Radius(0).OnClick(func() {
 				if a.window != nil {
 					a.window.ToggleMaximize()
 				}
 			})
 		}
-		b := iconButton(c, "close", "Close window", false).Size(44, 42).Radius(0)
+		b := iconButton(c.Key("close"), "close", "Close window", false).Size(44, 42).Radius(0)
 		if b.Hovered() {
 			b.Background(ui.Hex("#b6293d")).TextColor(ui.Hex("#ffffff"))
 		}
@@ -126,14 +183,16 @@ func (a *app) lyricsView(c *ui.Context) {
 		})
 		return
 	}
-	ui.Row(c).Label("Lyric controls").FillWidth().Gap(8).AlignItems(ui.Center).Children(func() {
-		ui.Row(c.Key("lyric-modes")).Shrink(0).Gap(4).AlignItems(ui.Center).Children(func() {
+	position := a.lyricPosition()
+	active := a.lyrics.active(position)
+	ui.Row(c).Label("Lyric controls").FillWidth().Gap(4).AlignItems(ui.Center).Children(func() {
+		ui.Row(c.Key("lyric-modes")).Shrink(0).Gap(3).AlignItems(ui.Center).Children(func() {
 			for _, mode := range []string{"Static", "Timed", "Words"} {
-				b := textButton(c.Key(mode), "", mode).Padding(7, 8).FontSize(11).Border(0, ui.Transparent).Background(t.Background).TextColor(t.Text)
+				b := textButton(c.Key(mode), "", mode).Padding(7, 6).FontSize(11).Border(0, ui.Transparent).Background(t.Background).TextColor(t.Text)
 				if a.lyricMode == mode {
 					b.Background(t.Selection).TextColor(t.Accent)
 				}
-				b.Disabled(mode == "Timed" && !a.lyrics.Timed || mode == "Words" && !a.lyrics.WordTimed).OnClick(func() { a.lyricMode = mode; a.lyricActive = -1; a.updatePulse() })
+				b.Disabled(mode == "Timed" && !a.lyrics.Timed || mode == "Words" && !a.lyrics.WordTimed).OnClick(func() { a.lyricMode = mode; a.lyricFollowChanged(); a.updatePulse() })
 			}
 			if a.lyrics.Timed {
 				a.lyricTimingControl(c)
@@ -141,26 +200,30 @@ func (a *app) lyricsView(c *ui.Context) {
 		})
 		ui.Spacer(c).Grow(1)
 		if a.lyrics.Timed && a.lyricMode != "Static" {
+			iconButton(c.Key("current-lyric"), "locate", "Return to current lyric", false).Size(28, 28).Disabled(active < 0).OnClick(func() {
+				a.scrollToLyric(c, a.lyrics.active(a.lyricPosition()))
+			})
 			width, _ := c.Size()
 			if width < 1000 {
-				iconButton(c, "follow", "Follow playback", a.followLyrics).Size(28, 28).OnClick(func() { a.followLyrics = !a.followLyrics; a.lyricActive = -1 })
+				iconButton(c, "follow", "Follow playback", a.followLyrics).Size(28, 28).OnClick(func() { a.followLyrics = !a.followLyrics; a.lyricFollowChanged() })
 			} else {
-				ui.Checkbox(c, &a.followLyrics, "Follow playback").Shrink(0).FontSize(10).OnChange(func() { a.lyricActive = -1 })
+				ui.Checkbox(c, &a.followLyrics, "Follow playback").Shrink(0).FontSize(10).OnChange(a.lyricFollowChanged)
 			}
 		}
 	})
-	position := a.lyricPosition()
-	active := a.lyrics.active(position)
+	if len(a.lyricRows) != len(a.lyrics.Lines) {
+		a.lyricRows = make([]ui.Handle, len(a.lyrics.Lines))
+	}
 	if active != a.lyricActive {
 		a.lyricActive = active
 		if a.followLyrics && a.lyricMode != "Static" && active >= 0 {
-			a.lyricList.ScrollTo(active, ui.Center)
+			a.scrollToLyric(c, active)
 		}
 	}
-	ui.List(c.Key(a.lyricsPath+"/"+a.lyricMode), &a.lyricList, len(a.lyrics.Lines)).FillWidth().Grow(1).MinHeight(0).Padding(16, 16, 20, 0).ItemKey(func(i int) any { return i }).Rows(func(row ui.ListRow) {
+	ui.List(c.Key(a.lyricsPath+"/"+a.lyricMode), &a.lyricList, len(a.lyrics.Lines)).TrackScroll(&a.lyricScroll).Label("Lyric lines").FillWidth().Grow(1).MinHeight(0).Padding(16, 16, 20, 0).ItemKey(func(i int) any { return i }).Rows(func(row ui.ListRow) {
 		c := row.Context
 		line := a.lyrics.Lines[row.Index]
-		isActive := a.lyricMode != "Static" && row.Index == active
+		isActive := a.lyricMode != "Static" && line.singing(position)
 		color := t.Text
 		fontSize := float32(16)
 		pose := ui.Pose{}
@@ -169,20 +232,17 @@ func (a *app) lyricsView(c *ui.Context) {
 			fontSize = 23
 			distance := math.Abs(float64(row.Index - max(0, active)))
 			strength := float32(math.Exp(-.32 * distance))
-			pose = ui.Pose{Scale: .52 + .48*strength, Fade: .6 * (1 - strength)}
+			pose = ui.Pose{Scale: .72 + .28*strength, Fade: .45 * (1 - strength)}
 			color = t.Text.Mix(t.TextMuted, float32(1-math.Exp(-.85*distance)))
 		}
 		if isActive {
 			color = t.Text
 			pose = ui.Pose{X: 6, Scale: 1}
 		}
-		b := ui.Button(c, "").Label("Lyric line "+fmt.Sprint(row.Index+1)).FillWidth().Padding(14, 4).Border(0, ui.Transparent).Background(ui.Transparent).TextColor(color)
-		if a.lyrics.Timed && a.lyricMode != "Static" {
-			b.Tooltip("Seek to this line")
-		}
+		b := ui.Button(c, "").Bind(&a.lyricRows[row.Index]).Label("Lyric line "+fmt.Sprint(row.Index+1)).FillWidth().Padding(14, 4).Border(0, ui.Transparent).Background(ui.Transparent).TextColor(color)
 		b.Children(func() {
-			text := ui.RichText(c).FontSize(fontSize).LineHeight(1.5).FillWidth().TransformOrigin(0, .5).AnimatePose(pose, ui.Smooth)
-			text.TextColor(text.AnimateColor("line-color", color, ui.Animation{Duration: 220 * time.Millisecond}))
+			text := ui.RichText(c).FontSize(fontSize).LineHeight(1.5).FillWidth().TransformOrigin(0, .5).AnimatePose(pose, lyricLineMotion)
+			text.TextColor(text.AnimateColor("line-color", color, lyricLineMotion))
 			if a.lyricMode != "Static" {
 				text.Bold()
 			}
@@ -196,13 +256,20 @@ func (a *app) lyricsView(c *ui.Context) {
 						}
 						if isActive && w.At <= position {
 							wordColor = t.Text
-							if i+1 == len(line.Words) || line.Words[i+1].At > position {
+							if line.wordActive(i, position) {
 								wordColor = t.Accent
-								wordPose = ui.Pose{Y: -3, Scale: 1.025}
+								wordPose = ui.Pose{Y: -2, Scale: 1.015}
 							}
 						}
-						word := ui.Text(c.Key(i), w.Text).AnimatePose(wordPose, ui.Snappy)
-						word.TextColor(word.AnimateColor("word-color", wordColor, ui.Animation{Duration: 150 * time.Millisecond}))
+						word := ui.Text(c.Key(i), w.Text).AnimatePose(wordPose, lyricWordMotion)
+						word.TextColor(word.AnimateColor("word-color", wordColor, lyricWordMotion))
+						if strings.TrimSpace(w.Text) != "" {
+							word.Label(fmt.Sprintf("Lyric line %d word %d", row.Index+1, i+1)).Focusable().Cursor(ui.CursorPointer).OnClick(func() {
+								if a.engine != nil {
+									a.engine.Seek(a.lyricSeekTime(w.At))
+								}
+							})
+						}
 					}
 				} else {
 					value := line.Text
