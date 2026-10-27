@@ -2,9 +2,9 @@ name: Build and release MiniMuse
 
 on:
   push:
-    branches: [main]
+    branches: [master]
   pull_request:
-    branches: [main]
+    branches: [master]
 
 permissions:
   contents: read
@@ -57,8 +57,8 @@ jobs:
 
   release:
     name: Publish GitHub release
-    # A merged PR pushes to main; publishing here avoids duplicate releases.
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    # A merged PR pushes to master; publishing here avoids duplicate releases.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 10

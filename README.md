@@ -87,7 +87,7 @@ The build produces the Windows executable and installer under `build/windows-amd
 
 ### Automatic releases
 
-`.github/workflows/release.yml` tests, vets, and builds Windows x64 on pull requests targeting `main` and on every push to `main`. Only successful pushes publish a GitHub release, including pushes caused by merging a PR. The tag targets the exact tested commit. Publishing uses the built-in `GITHUB_TOKEN` with `contents: write`; no personal access token is needed.
+`.github/workflows/release.yml` tests, vets, and builds Windows x64 on pull requests targeting `master` and on every push to `master`. Only successful pushes publish a GitHub release, including pushes caused by merging a PR. The tag targets the exact tested commit. Publishing uses the built-in `GITHUB_TOKEN` with `contents: write`; no personal access token is needed.
 
 The release version uses the major/minor version from `mygo.json` and adds the workflow run number to its patch number. With the configured `0.1.0`, run 1 produces `v0.1.1`, run 2 produces `v0.1.2`, and so on. PR checks also consume run numbers, so release numbers can have gaps. Reruns keep their version; publishing an existing release fails rather than replacing its files. Change the major/minor in `mygo.json` when starting a new release series; keep this workflow's filename stable so its run counter continues.
 
