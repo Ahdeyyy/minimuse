@@ -6,9 +6,11 @@ import (
 	"encoding/binary"
 	"image"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/egoist/mygo/ui"
 	"golang.org/x/image/draw"
@@ -17,9 +19,10 @@ import (
 const maxArtworkBytes = 16 << 20
 
 type artEntry struct {
-	bitmap  *ui.Bitmap
-	used    uint64
-	loading bool
+	bitmap   *ui.Bitmap
+	backdrop *ui.Bitmap
+	used     uint64
+	loading  bool
 }
 
 // Only visible artwork is requested; one worker and 48 resized covers bound
@@ -67,13 +70,18 @@ func (a *app) startArtwork() {
 			case <-a.ctx.Done():
 				return
 			case t := <-a.artJobs:
-				bitmap := loadArtwork(t.Path)
+				img := loadArtwork(t.Path)
+				var bitmap, backdrop *ui.Bitmap
+				if img != nil {
+					bitmap = ui.NewBitmap(img)
+					backdrop = artworkBackdrop(img)
+				}
 				if a.closed.Load() {
 					return
 				}
 				a.window.Update(func() {
 					if e := a.art[pathKey(t.Path)]; e != nil && !a.closed.Load() {
-						e.bitmap, e.loading = bitmap, false
+						e.bitmap, e.backdrop, e.loading = bitmap, backdrop, false
 					}
 				})
 			}
@@ -81,7 +89,7 @@ func (a *app) startArtwork() {
 	}()
 }
 
-func loadArtwork(path string) *ui.Bitmap {
+func loadArtwork(path string) *image.RGBA {
 	if b := embeddedArtwork(path); len(b) > 0 {
 		if bitmap := artworkBitmap(b); bitmap != nil {
 			return bitmap
@@ -118,7 +126,7 @@ func readSmallFile(path string, limit int64) ([]byte, error) {
 	return b, err
 }
 
-func artworkBitmap(b []byte) *ui.Bitmap {
+func artworkBitmap(b []byte) *image.RGBA {
 	cfg, _, err := image.DecodeConfig(bytes.NewReader(b))
 	if err != nil || cfg.Width <= 0 || cfg.Height <= 0 || int64(cfg.Width)*int64(cfg.Height) > 32_000_000 {
 		return nil
@@ -134,7 +142,56 @@ func artworkBitmap(b []byte) *ui.Bitmap {
 	}
 	dst := image.NewRGBA(image.Rect(0, 0, w, h))
 	draw.ApproxBiLinear.Scale(dst, dst.Bounds(), img, img.Bounds(), draw.Src, nil)
-	return ui.NewBitmap(dst)
+	return dst
+}
+
+// Prepare a small, softly blurred backdrop once on the artwork worker, rather
+// than blurring a full window on every animated lyric frame. It shares the
+// cover's bounded cache lifetime and remains independent of the theme.
+func artworkBackdrop(img *image.RGBA) *ui.Bitmap {
+	bounds := img.Bounds()
+	scale := 64 / float64(max(bounds.Dx(), bounds.Dy()))
+	w, h := max(1, int(float64(bounds.Dx())*scale)), max(1, int(float64(bounds.Dy())*scale))
+	src := image.NewRGBA(image.Rect(0, 0, w, h))
+	draw.ApproxBiLinear.Scale(src, src.Bounds(), img, bounds, draw.Src, nil)
+
+	const radius = 9
+	var kernel [2*radius + 1]float64
+	var total float64
+	for i := -radius; i <= radius; i++ {
+		weight := math.Exp(-float64(i*i) / (2 * 3 * 3))
+		kernel[i+radius] = weight
+		total += weight
+	}
+	for i := range kernel {
+		kernel[i] /= total
+	}
+	for pass := range 2 {
+		dst := image.NewRGBA(src.Bounds())
+		for y := range h {
+			for x := range w {
+				var rgba [4]float64
+				for i := -radius; i <= radius; i++ {
+					sx, sy := x, y
+					if pass == 0 {
+						sx = min(w-1, max(0, x+i))
+					} else {
+						sy = min(h-1, max(0, y+i))
+					}
+					offset := src.PixOffset(sx, sy)
+					for ch := range rgba {
+						rgba[ch] += float64(src.Pix[offset+ch]) * kernel[i+radius]
+					}
+				}
+				offset := dst.PixOffset(x, y)
+				for ch := range rgba {
+					dst.Pix[offset+ch] = uint8(math.Round(rgba[ch]))
+				}
+			}
+		}
+		src = dst
+	}
+	return ui.NewBitmap(src)
 }
 
 func embeddedArtwork(path string) []byte {
@@ -322,20 +379,48 @@ func (a *app) upgradeMetadata() {
 		}
 	}
 	go func() {
+		batch := make([]track, 0, 64)
+		lastUpdate := time.Now()
+		flush := func() bool {
+			if len(batch) == 0 {
+				return true
+			}
+			results := batch
+			batch = make([]track, 0, 64)
+			done := make(chan struct{})
+			a.window.Update(func() {
+				defer close(done)
+				if a.closed.Load() {
+					return
+				}
+				for _, t := range results {
+					if i, ok := a.byPath[pathKey(t.Path)]; ok {
+						a.prefs.Tracks[i].Duration = t.Duration
+						a.prefs.Tracks[i].MediaVersion = 1
+					}
+				}
+			})
+			// Bound queued work during a slow frame; cancellation also releases
+			// the worker if the window closes before the callback is run.
+			select {
+			case <-done:
+				lastUpdate = time.Now()
+				return true
+			case <-a.ctx.Done():
+				return false
+			}
+		}
 		for _, old := range pending {
 			if a.ctx.Err() != nil {
 				return
 			}
-			t := readTrack(old.Path)
-			a.window.Update(func() {
-				if a.closed.Load() {
-					return
-				}
-				if i, ok := a.byPath[pathKey(t.Path)]; ok {
-					a.prefs.Tracks[i].Duration = t.Duration
-					a.prefs.Tracks[i].MediaVersion = 1
-				}
-			})
+			batch = append(batch, readTrack(old.Path))
+			if (len(batch) == cap(batch) || time.Since(lastUpdate) >= 200*time.Millisecond) && !flush() {
+				return
+			}
+		}
+		if !flush() {
+			return
 		}
 		if len(pending) > 0 && !a.closed.Load() {
 			a.window.Update(func() {

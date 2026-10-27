@@ -3,6 +3,7 @@
 package audio
 
 import (
+	"bufio"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -20,7 +21,43 @@ import (
 )
 
 const OutputRate = 48000
-const bytesPerFrame = 8 // stereo float32, preserving >16-bit source precision
+const bytesPerFrame = 8                                  // stereo float32, preserving >16-bit source precision
+const playerBufferBytes = OutputRate * bytesPerFrame / 4 // 250 ms of headroom
+
+// MP3 opening scans every compressed frame header. Buffer small reads while
+// preserving logical offsets, including seeks within unread buffered data.
+type bufferedSeeker struct {
+	source io.ReadSeeker
+	r      *bufio.Reader
+	pos    int64
+}
+
+func newBufferedSeeker(source io.ReadSeeker) *bufferedSeeker {
+	return &bufferedSeeker{source: source, r: bufio.NewReaderSize(source, 32*1024)}
+}
+
+func (r *bufferedSeeker) Read(p []byte) (int, error) {
+	n, err := r.r.Read(p)
+	r.pos += int64(n)
+	return n, err
+}
+
+func (r *bufferedSeeker) Seek(offset int64, whence int) (int64, error) {
+	if whence == io.SeekCurrent {
+		offset, whence = r.pos+offset, io.SeekStart
+	}
+	if whence == io.SeekStart && offset >= r.pos && offset-r.pos <= int64(r.r.Buffered()) {
+		_, err := r.r.Discard(int(offset - r.pos))
+		r.pos = offset
+		return r.pos, err
+	}
+	pos, err := r.source.Seek(offset, whence)
+	if err == nil {
+		r.r.Reset(r.source)
+		r.pos = pos
+	}
+	return pos, err
+}
 
 func Decode(path string) (beep.StreamSeekCloser, beep.Format, error) {
 	f, err := os.Open(path)
@@ -32,7 +69,7 @@ func Decode(path string) (beep.StreamSeekCloser, beep.Format, error) {
 	switch strings.ToLower(filepath.Ext(path)) {
 	case ".mp3":
 		var d nativeaudio.Decoder
-		d, err = nativemp3.NewDecoder(f)
+		d, err = nativemp3.NewDecoder(newBufferedSeeker(f))
 		if err == nil {
 			s, format = adaptNative(f, d, 2)
 		}
@@ -75,13 +112,14 @@ type nativeAdapter struct {
 	buf  [1024]float32
 	pos  int
 	err  error
+	eof  bool
 }
 
 func adaptNative(f *os.File, d nativeaudio.Decoder, precision int) (beep.StreamSeekCloser, beep.Format) {
 	return &nativeAdapter{file: f, d: d}, beep.Format{SampleRate: beep.SampleRate(d.SampleRate()), NumChannels: d.Channels(), Precision: precision}
 }
 func (d *nativeAdapter) Stream(samples [][2]float64) (int, bool) {
-	if d.err != nil {
+	if d.err != nil || d.eof {
 		return 0, false
 	}
 	ch := d.d.Channels()
@@ -107,11 +145,18 @@ func (d *nativeAdapter) Err() error    { return d.err }
 func (d *nativeAdapter) Len() int      { return int(d.d.Len()) }
 func (d *nativeAdapter) Position() int { return d.pos }
 func (d *nativeAdapter) Seek(p int) error {
+	// go-mp3 indexes a compressed frame at the target position; there is no
+	// frame at EOF. Represent it here so seeking to a slider's end is safe.
+	if p == d.Len() {
+		d.pos, d.err, d.eof = p, nil, true
+		return nil
+	}
 	if err := d.d.SetPosition(int64(p)); err != nil {
 		return err
 	}
 	d.pos = p
 	d.err = nil
+	d.eof = false
 	return nil
 }
 func (d *nativeAdapter) Close() error { return d.file.Close() }
@@ -172,26 +217,32 @@ func (r *pcmReader) reset() {
 }
 
 func (r *pcmReader) Read(p []byte) (int, error) {
-	count := min(len(p)/bytesPerFrame, len(r.samples))
+	// Refill in batches up to ~43 ms. Retain the small scratch buffer and
+	// bound each decode turn so a crossfade's other voice gets serviced too.
+	count := min(len(p)/bytesPerFrame, 2048)
 	if count == 0 {
 		return 0, io.ErrShortBuffer
 	}
-	n, _ := r.stream.Stream(r.samples[:count])
-	for i, sample := range r.samples[:n] {
-		for ch, value := range sample {
-			// Bound resampler overshoot; never boost gain or add an effect.
-			value = max(-1, min(1, value))
-			binary.LittleEndian.PutUint32(p[i*8+ch*4:], math.Float32bits(float32(value)))
+	total := 0
+	for total < count {
+		n, _ := r.stream.Stream(r.samples[:min(count-total, len(r.samples))])
+		for i, sample := range r.samples[:n] {
+			for ch, value := range sample {
+				// Bound resampler overshoot; never boost gain or add an effect.
+				value = max(-1, min(1, value))
+				binary.LittleEndian.PutUint32(p[(total+i)*8+ch*4:], math.Float32bits(float32(value)))
+			}
+		}
+		total += n
+		r.frames.Add(int64(n))
+		if err := r.stream.Err(); err != nil {
+			return total * bytesPerFrame, err
+		}
+		if n == 0 {
+			return total * bytesPerFrame, io.EOF
 		}
 	}
-	r.frames.Add(int64(n))
-	if err := r.stream.Err(); err != nil {
-		return n * 8, err
-	}
-	if n == 0 {
-		return 0, io.EOF
-	}
-	return n * 8, nil
+	return total * bytesPerFrame, nil
 }
 
 func (r *pcmReader) Seek(offset int64, whence int) (int64, error) {
@@ -211,6 +262,11 @@ func (r *pcmReader) Seek(offset int64, whence int) (int64, error) {
 	}
 	frame = max(0, min(end, frame))
 	sourceFrame := frame * int64(r.format.SampleRate) / OutputRate
+	if frame == end {
+		// Rounding output frames back to the source rate can otherwise leave
+		// one source sample before EOF (and replay it after an end seek).
+		sourceFrame = int64(r.decoder.Len())
+	}
 	if err := r.decoder.Seek(int(sourceFrame)); err != nil {
 		return 0, err
 	}

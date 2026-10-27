@@ -51,6 +51,7 @@ type app struct {
 	favoriteCount    int
 	selected         int
 	list             ui.ListState
+	trackAction      func()
 	searchHandle     ui.Handle
 	albums           []albumGroup
 	albumIndex       map[string]int
@@ -77,7 +78,8 @@ type app struct {
 	history          []string
 	seek             float64
 	muted            bool
-	volumeSave       *time.Timer
+	saveTimer        *time.Timer
+	saveGeneration   uint64
 	pulse            chan time.Duration
 	songScreen       bool
 	lyrics           lyricDocument
@@ -90,6 +92,7 @@ type app struct {
 	lyricList        ui.ListState
 	lyricScroll      ui.ScrollState
 	lyricRows        []ui.Handle
+	lyricLabels      []lyricRowLabels
 	lyricActive      int
 	followLyrics     bool
 	lyricTimingOpen  bool
@@ -158,6 +161,7 @@ func (a *app) start() {
 	go func() {
 		var ticker *time.Ticker
 		var ticks <-chan time.Time
+		var pending atomic.Bool
 		defer func() {
 			if ticker != nil {
 				ticker.Stop()
@@ -178,7 +182,13 @@ func (a *app) start() {
 					ticks = ticker.C
 				}
 			case <-ticks:
+				// A slow frame must not leave a backlog of obsolete progress
+				// callbacks ahead of input, artwork and playback notifications.
+				if pending.Swap(true) {
+					continue
+				}
 				a.window.Update(func() {
+					pending.Store(false)
 					if !a.closed.Load() && a.visible && !a.minimized {
 						s := a.engine.Snapshot()
 						if s.Path == a.prefs.Current {
@@ -211,6 +221,11 @@ func (a *app) updatePulse() {
 }
 
 func (a *app) persist() {
+	a.saveGeneration++
+	if a.saveTimer != nil {
+		a.saveTimer.Stop()
+		a.saveTimer = nil
+	}
 	if a.saves == nil {
 		return
 	}
@@ -227,6 +242,28 @@ func (a *app) persist() {
 	default:
 	}
 	a.saves <- p
+}
+
+// Continuous controls must settle before cloning and serializing the library.
+// Generation checks also discard a timer callback already queued on the UI.
+func (a *app) persistLater() {
+	if a.saves == nil {
+		return
+	}
+	a.saveGeneration++
+	generation := a.saveGeneration
+	if a.saveTimer != nil {
+		a.saveTimer.Stop()
+	}
+	a.saveTimer = time.AfterFunc(350*time.Millisecond, func() {
+		if !a.closed.Load() {
+			a.window.Update(func() {
+				if !a.closed.Load() && generation == a.saveGeneration {
+					a.persist()
+				}
+			})
+		}
+	})
 }
 
 func (a *app) reindex() {
@@ -509,10 +546,16 @@ func (a *app) acceptStatus(s audio.Status) {
 	if s.Path != a.prefs.Current {
 		return
 	}
+	previous := a.status
+	wasPlaying := a.prefs.Playing
 	a.status = s
 	a.seek = s.Position.Seconds()
 	a.rememberPlayback(s)
-	a.persist()
+	if s.Path != previous.Path || s.Playing != previous.Playing || s.Playing != wasPlaying || s.Ended || s.Error != "" || s.NearEnd {
+		a.persist()
+	} else {
+		a.persistLater()
+	}
 	a.updatePulse()
 	if s.Error != "" {
 		a.notice = "Playback stopped: " + s.Error
@@ -541,7 +584,7 @@ func (a *app) configureCrossfade() {
 
 func (a *app) crossfadeChanged() {
 	a.configureCrossfade()
-	a.persist()
+	a.persistLater()
 }
 
 func (a *app) advance(automatic bool) {
@@ -702,23 +745,7 @@ func (a *app) setVolume() {
 	if a.engine != nil {
 		a.engine.Volume(a.prefs.Volume / 100)
 	}
-	// A slider can change every pointer event. Save once it settles, rather
-	// than cloning/serializing a large library for every intermediate value.
-	if a.saves == nil {
-		return
-	}
-	if a.volumeSave != nil {
-		a.volumeSave.Stop()
-	}
-	a.volumeSave = time.AfterFunc(350*time.Millisecond, func() {
-		if !a.closed.Load() {
-			a.window.Update(func() {
-				if !a.closed.Load() {
-					a.persist()
-				}
-			})
-		}
-	})
+	a.persistLater()
 }
 func (a *app) mute() {
 	a.muted = !a.muted

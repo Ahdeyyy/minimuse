@@ -1,0 +1,84 @@
+name: Build and release MiniMuse
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+env:
+  CGO_ENABLED: '0'
+
+jobs:
+  build:
+    name: Check and build Windows x64
+    runs-on: windows-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: pwsh
+    outputs:
+      version: ${{ steps.package.outputs.version }}
+      tag: ${{ steps.package.outputs.tag }}
+      artifact: ${{ steps.package.outputs.artifact }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Verify modules
+        run: go mod verify
+
+      - name: Test
+        run: go test ./...
+
+      - name: Vet Go and MyGo UI lifetimes
+        run: go tool mygo vet .
+
+      - name: Build versioned executable and installer
+        id: package
+        run: ./scripts/build-release.ps1 -BuildNumber $env:GITHUB_RUN_NUMBER
+
+      - name: Save release files
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ steps.package.outputs.artifact }}
+          path: ${{ steps.package.outputs.directory }}/*
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    name: Publish GitHub release
+    # A merged PR pushes to main; publishing here avoids duplicate releases.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: ${{ needs.build.outputs.artifact }}
+          path: release
+
+      - name: Create release for the tested commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ needs.build.outputs.tag }}
+          RELEASE_VERSION: ${{ needs.build.outputs.version }}
+          RELEASE_COMMIT: ${{ github.sha }}
+        run: |
+          gh release create "$RELEASE_TAG" release/* \
+            --target "$RELEASE_COMMIT" \
+            --title "MiniMuse v$RELEASE_VERSION" \
+            --generate-notes

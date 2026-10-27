@@ -4,7 +4,7 @@ A small, native Go music player for long listening sessions. Its Martian Grotesk
 
 ## Run
 
-Open `build/windows-amd64/MiniMuse.exe`, or install with `MiniMuse Setup 0.1.0 amd64.exe` in the same folder. The executable is portable; its fonts and icons are embedded.
+Download `MiniMuse-v<version>.exe` (portable) or `MiniMuse-setup-v<version>.exe` (installer) from GitHub Releases. For local builds, open `build/windows-amd64/MiniMuse.exe`, or install with `minimuse-setup-0.1.0-amd64.exe` in the same folder. The executable is portable; its fonts and icons are embedded.
 
 Add a music folder, add individual files, or drop files/folders onto the window. Double-click a song or press Enter in the song list to play it. Search matches titles, artists, and albums.
 
@@ -52,9 +52,9 @@ Settings normally live in `%APPDATA%\MiniMuse\library.json`. Writes use a synchr
 
 ## Resource use and audio
 
-Only the current track is decoded for playback, with one additional stream during a crossfade. Imports and a one-time upgrade of older library entries open decoders to read durations, then close them. Each playback stream uses a fixed 125 ms PCM queue (48,000 bytes), plus decoder, resampler, device, and small scratch buffers. Tracks are never decoded into a full-song cache. FLAC seeking searches compressed frame offsets and checks frame CRCs, avoiding a full-song decode on the first seek, including files without seek tables. Other compressed formats may retain small seek tables proportional to file duration. The saved library keeps text metadata, durations, folder sources, paths, and the last playback position and playing state; visible artwork uses a bounded in-memory cache.
+Only the current track is decoded for playback, with one additional stream during a crossfade. Imports and a one-time upgrade of older library entries open decoders to read durations, then close them. Each playback stream targets a 250 ms PCM queue (96,000 bytes), plus at most one 2,048-frame refill batch, decoder, resampler, device, and small scratch buffers. MP3 frame scanning uses a 32 KiB file buffer. Tracks are never decoded into a full-song cache. FLAC seeking searches compressed frame offsets and checks frame CRCs, avoiding a full-song decode on the first seek, including files without seek tables. Other compressed formats may retain small seek tables proportional to file duration. The saved library keeps text metadata, durations, folder sources, paths, and the last playback position and playing state; visible artwork uses a bounded in-memory cache.
 
-Playback work, imports, artwork/lyrics loading, downloads, file dialogs, and persistence run off the UI thread. The song and lyric lists virtualize visible rows; searches run only when the query or library changes. Playback progress refreshes once a second while visible, or up to 60 times a second while synchronized lyrics are displayed for responsive word and line timing. It stops when hidden/minimized and sleeps when paused. Pausing suspends the output device. Volume writes are debounced; no periodic disk writes occur while listening to one song.
+Playback work, imports, artwork/lyrics loading, downloads, file dialogs, and persistence run off the UI thread. The song and lyric lists virtualize visible rows; searches run only when the query or library changes. Playback progress refreshes once a second while visible, or up to 60 times a second while synchronized lyrics are displayed, with interpolation between device samples. Progress updates cannot accumulate a UI callback backlog. They stop when hidden/minimized and sleep when paused. Pausing suspends the output device. Consecutive pending seek/volume commands coalesce; seek, volume, lyric-offset, and crossfade-setting saves wait 350 ms for controls to settle. No periodic disk writes occur while listening to one song. Older-library metadata upgrades publish bounded batches instead of redrawing for every track.
 
 Software rendering is the default to avoid the graphics driver's persistent memory cost for this mostly static interface. Set `MYGO_GPU=1` before launching to opt into GPU rendering; it may suit very large/high-DPI windows better. Close all existing instances for the change to take effect.
 
@@ -69,9 +69,11 @@ Measurements on this Windows machine (Intel i5-1145G7, 8 logical CPUs), using a 
 
 These are short, local measurements, not a claim of an hours-long soak or fixed memory use for every codec/library/device. Use `scripts/measure-process.ps1 -ProcessId <id> -Seconds 30 -Phase tray` to measure your own library. For CPU profiling, start with `-cpuprofile <path>` and quit normally to finish the profile; Windows profiles can attribute blocked native waits to syscall stacks, so use OS CPU counters for actual utilization.
 
+The October 2026 review, measured improvements, and remaining playback limits are recorded in [PERFORMANCE.md](PERFORMANCE.md). Its MP3-opening benchmark improved about 17 times, and animated-lyric refresh allocation fell about 26%. These are fixture measurements, not a guarantee for every file or device.
+
 ## Development and checks
 
-Go 1.27.3 and MyGo 0.6.4 are pinned in `go.mod`. Windows is the verified target.
+Go 1.27.3 and MyGo 0.7.1 are pinned in `go.mod`. Windows is the verified target.
 
 ```powershell
 $env:CGO_ENABLED='0'
@@ -82,6 +84,20 @@ go tool mygo build
 ```
 
 The build produces the Windows executable and installer under `build/windows-amd64/`. `go run ./cmd/brand-assets` regenerates the app/tray PNGs from `resources/logo.svg`.
+
+### Automatic releases
+
+`.github/workflows/release.yml` tests, vets, and builds Windows x64 on pull requests targeting `main` and on every push to `main`. Only successful pushes publish a GitHub release, including pushes caused by merging a PR. The tag targets the exact tested commit. Publishing uses the built-in `GITHUB_TOKEN` with `contents: write`; no personal access token is needed.
+
+The release version uses the major/minor version from `mygo.json` and adds the workflow run number to its patch number. With the configured `0.1.0`, run 1 produces `v0.1.1`, run 2 produces `v0.1.2`, and so on. PR checks also consume run numbers, so release numbers can have gaps. Reruns keep their version; publishing an existing release fails rather than replacing its files. Change the major/minor in `mygo.json` when starting a new release series; keep this workflow's filename stable so its run counter continues.
+
+Each release includes:
+
+- `MiniMuse-v0.1.1.exe`: portable executable.
+- `MiniMuse-setup-v0.1.1.exe`: installer.
+- `MiniMuse-v0.1.1.sha256`: SHA-256 checksums for both downloads.
+
+To build the same release files locally, run `./scripts/build-release.ps1` (the configured version), or `./scripts/build-release.ps1 -BuildNumber 1` (the configured patch plus 1). Files go to `build/releases/v<version>/`; the script restores `mygo.json` after building. MyGo downloads NSIS on Windows if needed. These releases target Windows x64.
 
 Optional hardware and visual checks:
 

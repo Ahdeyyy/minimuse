@@ -14,6 +14,11 @@ import (
 var lyricLineMotion = ui.Animation{Spring: ui.SpringOptions{Duration: 650 * time.Millisecond}}
 var lyricWordMotion = ui.Animation{Spring: ui.SpringOptions{Duration: 280 * time.Millisecond}}
 
+type lyricRowLabels struct {
+	line  string
+	words []string
+}
+
 func (a *app) stopLyricScroll() {
 	s := a.lyricScroll
 	a.lyricScroll = ui.ScrollState{Handle: s.Handle, X: s.X, Y: s.Y, MaxX: s.MaxX, MaxY: s.MaxY}
@@ -109,6 +114,31 @@ func (a *app) openSong() {
 		a.loadLyrics(false)
 	}
 	a.updatePulse()
+}
+
+func (a *app) songBackdrop(c *ui.Context, panel ui.Element) {
+	tr := a.current()
+	if tr == nil {
+		return
+	}
+	a.coverFor(tr)
+	art := a.art[pathKey(tr.Path)]
+	if art == nil || art.backdrop == nil {
+		return
+	}
+	backdrop := art.backdrop
+	t := c.Theme()
+	opacity := float32(.86)
+	if t.Dark {
+		opacity = .80
+	}
+	veil := t.Surface.Alpha(opacity)
+	panel.Draw(func(p *ui.Painter, r ui.Rect) {
+		p.Clip(r, 12, func() {
+			p.Image(backdrop, r, ui.Cover)
+			p.Fill(r, veil, 0)
+		})
+	})
 }
 
 func (a *app) songView(c *ui.Context, width float32) {
@@ -213,6 +243,15 @@ func (a *app) lyricsView(c *ui.Context) {
 	})
 	if len(a.lyricRows) != len(a.lyrics.Lines) {
 		a.lyricRows = make([]ui.Handle, len(a.lyrics.Lines))
+		a.lyricLabels = make([]lyricRowLabels, len(a.lyrics.Lines))
+		for i, line := range a.lyrics.Lines {
+			labels := &a.lyricLabels[i]
+			labels.line = fmt.Sprintf("Lyric line %d", i+1)
+			labels.words = make([]string, len(line.Words))
+			for j := range line.Words {
+				labels.words[j] = fmt.Sprintf("Lyric line %d word %d", i+1, j+1)
+			}
+		}
 	}
 	if active != a.lyricActive {
 		a.lyricActive = active
@@ -239,7 +278,7 @@ func (a *app) lyricsView(c *ui.Context) {
 			color = t.Text
 			pose = ui.Pose{X: 6, Scale: 1}
 		}
-		b := ui.Button(c, "").Bind(&a.lyricRows[row.Index]).Label("Lyric line "+fmt.Sprint(row.Index+1)).FillWidth().Padding(14, 4).Border(0, ui.Transparent).Background(ui.Transparent).TextColor(color)
+		b := ui.ButtonBase(c).Bind(&a.lyricRows[row.Index]).Label(a.lyricLabels[row.Index].line).FillWidth().Padding(14, 4).Radius(t.Radius).Border(0, ui.Transparent).Background(ui.Transparent).TextColor(color)
 		b.Children(func() {
 			text := ui.RichText(c).FontSize(fontSize).LineHeight(1.5).FillWidth().TransformOrigin(0, .5).AnimatePose(pose, lyricLineMotion)
 			text.TextColor(text.AnimateColor("line-color", color, lyricLineMotion))
@@ -264,7 +303,7 @@ func (a *app) lyricsView(c *ui.Context) {
 						word := ui.Text(c.Key(i), w.Text).AnimatePose(wordPose, lyricWordMotion)
 						word.TextColor(word.AnimateColor("word-color", wordColor, lyricWordMotion))
 						if strings.TrimSpace(w.Text) != "" {
-							word.Label(fmt.Sprintf("Lyric line %d word %d", row.Index+1, i+1)).Focusable().Cursor(ui.CursorPointer).OnClick(func() {
+							word.Label(a.lyricLabels[row.Index].words[i]).Focusable().Cursor(ui.CursorPointer).OnClick(func() {
 								if a.engine != nil {
 									a.engine.Seek(a.lyricSeekTime(w.At))
 								}

@@ -1,5 +1,6 @@
 {
   "name": "MiniMuse",
+  "slug": "minimuse",
   "identifier": "app.minimuse.player",
   "version": "0.1.0",
   "out": "build",

@@ -378,6 +378,7 @@ func (a *app) clearLyrics() {
 	a.lyricList = ui.ListState{}
 	a.lyricScroll = ui.ScrollState{}
 	a.lyricRows = nil
+	a.lyricLabels = nil
 	a.lyricTimingOpen = false
 }
 
@@ -404,7 +405,7 @@ func (a *app) lyricTimingChanged() {
 		tr.LyricOffsetMS = max(-300000, min(300000, tr.LyricOffsetMS))
 	}
 	a.lyricActive = -1
-	a.persist()
+	a.persistLater()
 }
 
 func (a *app) loadLyrics(online bool) {

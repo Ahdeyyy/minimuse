@@ -31,31 +31,71 @@ type command struct {
 // Engine serializes all device and decoder operations on one worker. The UI
 // never decodes, seeks, opens a sound device, or waits for a disk read.
 type Engine struct {
-	commands chan command
-	done     chan struct{}
-	closed   atomic.Bool
-	onChange func(Status)
-	status   atomic.Pointer[Status]
-	once     sync.Once
+	commandMu    sync.Mutex
+	commands     []command
+	commandReady chan struct{}
+	done         chan struct{}
+	closed       atomic.Bool
+	onChange     func(Status)
+	status       atomic.Pointer[playbackSnapshot]
+	once         sync.Once
 }
 
+type playbackSnapshot struct {
+	status Status
+	at     time.Time
+}
+
+const statusInterval = 40 * time.Millisecond
+
 func New(onChange func(Status)) *Engine {
-	e := &Engine{commands: make(chan command, 64), done: make(chan struct{}), onChange: onChange}
-	e.status.Store(&Status{})
+	e := &Engine{commands: make([]command, 0, 65), commandReady: make(chan struct{}, 1), done: make(chan struct{}), onChange: onChange}
+	e.status.Store(&playbackSnapshot{})
 	go e.run()
 	return e
 }
 
 func (e *Engine) send(c command) bool {
+	e.commandMu.Lock()
+	defer e.commandMu.Unlock()
 	if e.closed.Load() {
 		return false
 	}
-	select {
-	case e.commands <- c:
+	// Slider motion replaces only adjacent commands of the same kind.
+	// Keep load/toggle/stop ordering, and retain the last seek/volume even
+	// when a slow decoder leaves many pointer events waiting.
+	if n := len(e.commands); n > 0 && e.commands[n-1].kind == c.kind &&
+		(c.kind == "seek" || c.kind == "volume" || c.kind == "crossfade") {
+		e.commands[n-1] = c
 		return true
-	default:
+	}
+	if len(e.commands) >= 64 {
 		return false
 	}
+	e.commands = append(e.commands, c)
+	e.signalCommand()
+	return true
+}
+
+// The command mutex is held by callers. Notification is level-triggered.
+func (e *Engine) signalCommand() {
+	select {
+	case e.commandReady <- struct{}{}:
+	default:
+	}
+}
+
+func (e *Engine) takeCommand() command {
+	e.commandMu.Lock()
+	defer e.commandMu.Unlock()
+	c := e.commands[0]
+	copy(e.commands, e.commands[1:])
+	e.commands[len(e.commands)-1] = command{}
+	e.commands = e.commands[:len(e.commands)-1]
+	if len(e.commands) > 0 {
+		e.signalCommand()
+	}
+	return c
 }
 func (e *Engine) Load(path string) bool { return e.send(command{kind: "load", path: path}) }
 func (e *Engine) Restore(path string, position time.Duration, playing bool) bool {
@@ -65,14 +105,40 @@ func (e *Engine) Toggle()              { e.send(command{kind: "toggle"}) }
 func (e *Engine) Stop()                { e.send(command{kind: "stop"}) }
 func (e *Engine) Seek(d time.Duration) { e.send(command{kind: "seek", value: d.Seconds()}) }
 func (e *Engine) Volume(v float64)     { e.send(command{kind: "volume", value: max(0, min(1, v))}) }
-func (e *Engine) Snapshot() Status     { return *e.status.Load() }
+func (e *Engine) Snapshot() Status {
+	s := e.status.Load()
+	if e.closed.Load() {
+		return s.status
+	}
+	return s.positionAt(time.Now())
+}
+
+func (s playbackSnapshot) positionAt(now time.Time) Status {
+	state := s.status
+	if state.Playing && !state.Ended && state.Error == "" && !s.at.IsZero() {
+		// Smooth 60 Hz lyric updates between device samples. Stop extrapolating
+		// if a disk read, seek or device operation delays the worker.
+		state.Position += max(0, min(now.Sub(s.at), statusInterval))
+		if state.Duration > 0 {
+			state.Position = min(state.Duration, state.Position)
+		}
+	}
+	return state
+}
 
 // Crossfade sets the overlap duration. Zero disables it.
 func (e *Engine) Crossfade(d time.Duration) {
 	e.send(command{kind: "crossfade", value: max(0, min(12, d.Seconds()))})
 }
 func (e *Engine) Close() {
-	e.once.Do(func() { e.closed.Store(true); e.commands <- command{kind: "close"} })
+	e.once.Do(func() {
+		e.commandMu.Lock()
+		defer e.commandMu.Unlock()
+		e.closed.Store(true)
+		// Reserve one extra slot so shutdown never waits for queue space.
+		e.commands = append(e.commands, command{kind: "close"})
+		e.signalCommand()
+	})
 	<-e.done
 }
 
@@ -89,7 +155,7 @@ func (e *Engine) run() {
 	var state Status
 	volume := 1.0
 	var tick <-chan time.Time
-	timer := time.NewTicker(40 * time.Millisecond)
+	timer := time.NewTicker(statusInterval)
 	timer.Stop()
 	defer timer.Stop()
 	publish := func(notify bool) {
@@ -101,7 +167,7 @@ func (e *Engine) run() {
 			}
 		}
 		s := state
-		e.status.Store(&s)
+		e.status.Store(&playbackSnapshot{status: s, at: time.Now()})
 		if notify && e.onChange != nil {
 			e.onChange(s)
 		}
@@ -146,7 +212,8 @@ func (e *Engine) run() {
 	defer release()
 	for {
 		select {
-		case c := <-e.commands:
+		case <-e.commandReady:
+			c := e.takeCommand()
 			switch c.kind {
 			case "close":
 				if player != nil {
@@ -212,13 +279,13 @@ func (e *Engine) run() {
 				}
 				overlap = min(overlap, state.Duration/2)
 				player = device.NewPlayer(source)
-				player.SetBufferSize(OutputRate * bytesPerFrame / 8) // 125 ms, 48 KB
+				player.SetBufferSize(playerBufferBytes)
 				applyVolume()
 				if !c.paused {
 					player.Play()
 					state.Playing = true
 					tick = timer.C
-					timer.Reset(40 * time.Millisecond)
+					timer.Reset(statusInterval)
 				} else {
 					_ = device.Suspend()
 				}
@@ -244,7 +311,7 @@ func (e *Engine) run() {
 					if outgoing != nil {
 						outgoing.Play()
 					}
-					timer.Reset(40 * time.Millisecond)
+					timer.Reset(statusInterval)
 					tick = timer.C
 				}
 				state.Playing = !state.Playing

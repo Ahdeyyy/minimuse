@@ -15,6 +15,12 @@ func (a *app) searchVisible() bool {
 }
 
 func (a *app) view(c *ui.Context) {
+	// Menu choices are delivered while rows are being built. Apply them at
+	// the next pass's start, before any list captures its count or indices.
+	if action := a.trackAction; action != nil {
+		a.trackAction = nil
+		action()
+	}
 	c.SetTheme(a.theme)
 	t := c.Theme()
 	c.Root().Background(t.Background)
@@ -46,7 +52,11 @@ func (a *app) view(c *ui.Context) {
 		a.titlebar(c)
 		ui.Row(c).FillWidth().Grow(1).MinHeight(0).Padding(20, 20, 14, 14).Gap(16).Children(func() {
 			a.sidebar(c)
-			ui.Column(c.Key("main-panel")).Grow(1).MinWidth(0).FillHeight().Background(t.Surface).Radius(12).Border(1, t.Border.Alpha(.65)).Clip().Children(func() {
+			panel := ui.Column(c.Key("main-panel")).Grow(1).MinWidth(0).FillHeight().Background(t.Surface).Radius(12).Border(1, t.Border.Alpha(.65)).Clip()
+			if a.songScreen {
+				a.songBackdrop(c, panel)
+			}
+			panel.Children(func() {
 				if a.songScreen {
 					a.songView(c, w)
 				} else {
@@ -255,7 +265,12 @@ func (a *app) songRow(c *ui.Context, i int, selected bool, width float32) {
 		}
 		ui.Text(c, duration).Width(46).FontSize(11).TextColor(t.TextMuted).TextAlign(ui.End).Label("Duration of " + tr.Title)
 		iconButton(c, "heart", "Favorite "+tr.Title, tr.Favorite).Size(28, 28).OnClick(func() { a.favorite(tr.Path) })
-		iconButton(c, "more", "Actions for "+tr.Title, false).Size(28, 28).Menu(func(m *ui.Menu) { a.trackMenu(m, tr.Path, i) })
+		iconButton(c, "more", "Actions for "+tr.Title, false).Size(28, 28).Menu(func(m *ui.Menu) {
+			if action := a.trackMenu(m, tr.Path, i); action != nil {
+				a.trackAction = action
+				c.Invalidate()
+			}
+		})
 	})
 	if current && a.status.Path == tr.Path && !a.status.Ended && a.status.Error == "" {
 		e.OnClick(a.openSong)
@@ -372,54 +387,61 @@ func clockTime(d time.Duration) string {
 	return fmt.Sprintf("%d:%02d", s/60, s%60)
 }
 
-func (a *app) trackMenu(m *ui.Menu, path string, index int) {
+func (a *app) trackMenu(m *ui.Menu, path string, index int) func() {
 	if m.Item("Play now").Chosen() {
-		a.playFrom(index)
+		return func() { a.playFrom(index) }
 	}
 	if m.Item("Play next").Chosen() {
-		a.enqueue(path, true)
+		return func() { a.enqueue(path, true) }
 	}
 	if m.Item("Add to queue").Chosen() {
-		a.enqueue(path, false)
+		return func() { a.enqueue(path, false) }
 	}
 	if len(a.prefs.Playlists) > 0 {
+		var action func()
 		m.Submenu("Add to playlist", func(m *ui.Menu) {
 			for _, p := range a.prefs.Playlists {
 				if m.Item(p.Name).Chosen() {
-					a.addToPlaylist(p.Name, path)
+					action = func() { a.addToPlaylist(p.Name, path) }
 				}
 			}
 		})
+		if action != nil {
+			return action
+		}
 	}
 	m.Separator()
 	if m.Item("Show in folder").Chosen() {
-		mygo.Shell.ShowItemInFolder(path)
+		return func() { mygo.Shell.ShowItemInFolder(path) }
 	}
 	if a.section == "Queue" {
 		if m.Item("Move up").Chosen() {
-			a.moveQueue(path, -1)
+			return func() { a.moveQueue(path, -1) }
 		}
 		if m.Item("Move down").Chosen() {
-			a.moveQueue(path, 1)
+			return func() { a.moveQueue(path, 1) }
 		}
 		if m.Item("Remove from queue").Chosen() {
-			a.remove(path, false)
+			return func() { a.remove(path, false) }
 		}
 	} else if strings.HasPrefix(a.section, "playlist:") {
 		if m.Item("Remove from playlist").Chosen() {
-			for i := range a.prefs.Playlists {
-				p := &a.prefs.Playlists[i]
-				if "playlist:"+p.Name == a.section {
-					p.Paths = slices.DeleteFunc(p.Paths, func(s string) bool { return s == path })
-					a.refreshFilter()
-					a.persist()
-					break
+			return func() {
+				for i := range a.prefs.Playlists {
+					p := &a.prefs.Playlists[i]
+					if "playlist:"+p.Name == a.section {
+						p.Paths = slices.DeleteFunc(p.Paths, func(s string) bool { return s == path })
+						a.refreshFilter()
+						a.persist()
+						break
+					}
 				}
 			}
 		}
 	} else if m.Item("Remove from library").Chosen() {
-		a.remove(path, true)
+		return func() { a.remove(path, true) }
 	}
+	return nil
 }
 
 func (a *app) savePlaylistDialog(c *ui.Context) {

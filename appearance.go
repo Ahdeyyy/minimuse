@@ -135,7 +135,7 @@ func iconButton(c *ui.Context, name, label string, active bool) ui.Element {
 	if name == "heart" && active {
 		name = "heart-filled"
 	}
-	b := ui.Button(c, "").Label(label).Tooltip(label).Size(34, 34).Padding(0).Gap(0).Center().Shrink(0).Border(0, ui.Transparent).Background(ui.Transparent).TextColor(t.Text).Radius(8)
+	b := ui.ButtonBase(c).Label(label).Tooltip(label).Size(34, 34).Padding(0).Gap(0).Center().Shrink(0).Border(0, ui.Transparent).Background(ui.Transparent).TextColor(t.Text).Radius(8)
 	if b.Hovered() {
 		b.Background(t.SurfaceHover)
 	}

@@ -167,8 +167,8 @@ func (a *app) shutdown() {
 		return
 	}
 	a.cancel()
-	if a.volumeSave != nil {
-		a.volumeSave.Stop()
+	if a.saveTimer != nil {
+		a.saveTimer.Stop()
 	}
 	if a.engine != nil {
 		// Close drains pending commands and captures the final audible position
