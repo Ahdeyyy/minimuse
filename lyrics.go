@@ -372,7 +372,6 @@ func (a *app) clearLyrics() {
 	a.lyricsGeneration++
 	a.lyrics = lyricDocument{}
 	a.lyricsPath = ""
-	a.lyricsMessage = ""
 	a.lyricsBusy = false
 	a.lyricActive = -1
 	a.lyricList = ui.ListState{}
@@ -416,9 +415,9 @@ func (a *app) loadLyrics(online bool) {
 	a.clearLyrics()
 	a.lyricsPath = t.Path
 	a.lyricsBusy = true
-	a.lyricsMessage = "Looking for local lyrics…"
+	a.notice = "Looking for local lyrics…"
 	if online {
-		a.lyricsMessage = "Checking local lyrics, then LRCLIB…"
+		a.notice = "Checking local lyrics, then LRCLIB…"
 	}
 	a.lyricMode = ""
 	a.followLyrics = true
@@ -447,11 +446,11 @@ func (a *app) loadLyrics(online bool) {
 			}
 			a.lyricsBusy = false
 			a.lyrics = d
-			a.lyricsMessage = ""
+			a.notice = "Lyrics loaded"
 			if err != nil {
-				a.lyricsMessage = err.Error()
+				a.notice = err.Error()
 			} else if len(d.Lines) == 0 {
-				a.lyricsMessage = "No local lyrics found"
+				a.notice = "No local lyrics found"
 			}
 			if d.WordTimed {
 				a.lyricMode = "Words"

@@ -22,6 +22,7 @@ func (a *app) view(c *ui.Context) {
 		action()
 	}
 	c.SetTheme(a.theme)
+	defer a.toasts(c)
 	t := c.Theme()
 	c.Root().Background(t.Background)
 	c.OnShortcut(ui.Ctrl, ui.KeyO, func() { a.browse(false) })
@@ -64,12 +65,6 @@ func (a *app) view(c *ui.Context) {
 				}
 			})
 		})
-		if a.notice != "" {
-			ui.Row(c).FillWidth().Padding(0, 22, 10, 22).Gap(8).AlignItems(ui.Center).Children(func() {
-				ui.Text(c, a.notice).FontSize(11).TextColor(t.TextMuted).Grow(1).SingleLine().Tooltip(a.notice)
-				iconButton(c, "close", "Dismiss message", false).Size(22, 22).OnClick(func() { a.notice = "" })
-			})
-		}
 		ui.Row(c).FillWidth().Shrink(0).Padding(0, 16, 20, 16).Justify(ui.Center).Children(func() {
 			a.transport(c, min(1200, w-32))
 		})

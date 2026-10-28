@@ -4,8 +4,26 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 )
+
+func TestCustomTitlebarWindowOptions(t *testing.T) {
+	a := testApp(t, 0)
+	for _, goos := range []string{"linux", "windows", "darwin"} {
+		opts := a.windowOptions(goos, "#08090f", true)
+		if goos == "linux" {
+			if !opts.Frameless || opts.TitleBarStyle != mygo.TitleBarDefault {
+				t.Fatal("Linux must opt out of compositor title bars", opts)
+			}
+		} else if opts.Frameless || opts.TitleBarStyle != mygo.TitleBarHidden {
+			t.Fatal("keep native resize edges on Windows and macOS", goos, opts)
+		}
+		if !opts.HideWindowButtons || opts.TitleBarHeight != 42 || opts.Content == nil || !opts.Hidden {
+			t.Fatal("custom title bar or startup options lost", goos, opts)
+		}
+	}
+}
 
 func TestTitlebarSearch(t *testing.T) {
 	for _, size := range [][2]int{{820, 580}, {1080, 740}} {

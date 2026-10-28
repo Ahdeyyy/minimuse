@@ -194,20 +194,10 @@ func (a *app) lyricsView(c *ui.Context) {
 		iconButton(c, "refresh", "Reload local lyrics", false).Disabled(a.lyricsBusy).OnClick(func() { a.loadLyrics(false) })
 		textButton(c, "plus", "Get lyrics").Tooltip("Download from LRCLIB and save beside this song").Disabled(a.lyricsBusy).OnClick(func() { a.loadLyrics(true) })
 	})
-	if a.lyricsBusy {
-		ui.Text(c, a.lyricsMessage).FontSize(12).TextColor(t.TextMuted).FillWidth()
-	}
 	if len(a.lyrics.Lines) == 0 {
 		ui.Column(c).FillWidth().Grow(1).Justify(ui.Center).Gap(14).Children(func() {
 			ui.Icon(c, icons["lyrics"]).Size(32, 32).TextColor(t.Accent)
-			message := ""
-			if !a.lyricsBusy {
-				message = a.lyricsMessage
-			}
-			if message == "" {
-				message = "Lyrics live here"
-			}
-			ui.Text(c, message).FontSize(17).Bold().FillWidth()
+			ui.Text(c, "Lyrics live here").FontSize(17).Bold().FillWidth()
 			ui.Text(c, "Place a .txt, .lrc, or enhanced .elrc file beside the song, using the same filename. Or use Get lyrics to download from LRCLIB.").FontSize(12).TextColor(t.TextMuted).FillWidth().LineHeight(1.6)
 			ui.Text(c, "Word highlighting needs word timestamps in the lyric file.").FontSize(11).TextColor(t.TextMuted).FillWidth().LineHeight(1.5)
 		})

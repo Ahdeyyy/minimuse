@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"runtime"
 	"runtime/pprof"
 	"time"
 
@@ -82,7 +83,7 @@ func main() {
 			bg = "#08090f"
 		}
 		a.visible = !*startInTray
-		a.window = mygo.NewWindow(mygo.WindowOptions{Title: "MiniMuse", Width: 1080, Height: 740, MinWidth: 820, MinHeight: 580, StateKey: "main", Content: ui.View(a.view), BackgroundColor: bg, Hidden: *startInTray, TitleBarStyle: mygo.TitleBarHidden, HideWindowButtons: true, TitleBarHeight: 42})
+		a.window = mygo.NewWindow(a.windowOptions(runtime.GOOS, bg, *startInTray))
 		a.start()
 		a.setupTray()
 		if *startInTray && a.tray == nil {
@@ -124,6 +125,21 @@ func main() {
 	if err := mygo.App.Run(); err != nil {
 		log.Fatal(err)
 	}
+}
+
+func (a *app) windowOptions(goos, background string, hidden bool) mygo.WindowOptions {
+	opts := mygo.WindowOptions{
+		Title: "MiniMuse", Width: 1080, Height: 740, MinWidth: 820, MinHeight: 580,
+		StateKey: "main", Content: ui.View(a.view), BackgroundColor: background, Hidden: hidden,
+		TitleBarStyle: mygo.TitleBarHidden, HideWindowButtons: true, TitleBarHeight: 42,
+	}
+	if goos == "linux" {
+		// Hidden title bars can still request compositor decorations on Wayland.
+		// Frameless opts out entirely; our title bar supplies drag and controls.
+		opts.Frameless = true
+		opts.TitleBarStyle = mygo.TitleBarDefault
+	}
+	return opts
 }
 
 func parseSecondInstance(args []string) ([]string, bool, bool) {

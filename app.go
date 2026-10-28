@@ -72,7 +72,7 @@ type app struct {
 	playlistName     string
 	playlistList     ui.ListState
 	importing        bool
-	notice           string
+	notice           string // Pending notification, consumed once by the toast viewport.
 	queuePos         int
 	bag              []string
 	history          []string
@@ -84,7 +84,6 @@ type app struct {
 	songScreen       bool
 	lyrics           lyricDocument
 	lyricsPath       string
-	lyricsMessage    string
 	lyricsBusy       bool
 	lyricsCancel     context.CancelFunc
 	lyricsGeneration uint64
@@ -470,7 +469,6 @@ func (a *app) play(path string) {
 		a.clearLyrics()
 	}
 	a.queuePos = slices.Index(a.prefs.Queue, path)
-	a.notice = ""
 	a.persist()
 }
 

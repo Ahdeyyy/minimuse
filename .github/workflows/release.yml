@@ -14,16 +14,31 @@ env:
 
 jobs:
   build:
-    name: Check and build Windows x64
-    runs-on: windows-latest
+    name: Check and build ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows x64
+            os: windows-latest
+            platform: windows/amd64
+          - name: Linux x64
+            os: ubuntu-latest
+            platform: linux/amd64
+          - name: Linux ARM64
+            os: ubuntu-latest
+            platform: linux/arm64
+          - name: macOS universal
+            os: macos-latest
+            platform: darwin/universal
     defaults:
       run:
         shell: pwsh
     outputs:
       version: ${{ steps.package.outputs.version }}
       tag: ${{ steps.package.outputs.tag }}
-      artifact: ${{ steps.package.outputs.artifact }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -43,9 +58,11 @@ jobs:
       - name: Vet Go and MyGo UI lifetimes
         run: go tool mygo vet .
 
-      - name: Build versioned executable and installer
+      - name: Build versioned executable and packages
         id: package
-        run: ./scripts/build-release.ps1 -BuildNumber $env:GITHUB_RUN_NUMBER
+        env:
+          BUILD_PLATFORM: ${{ matrix.platform }}
+        run: ./scripts/build-release.ps1 -BuildNumber $env:GITHUB_RUN_NUMBER -Platform $env:BUILD_PLATFORM
 
       - name: Save release files
         uses: actions/upload-artifact@v7
@@ -67,7 +84,8 @@ jobs:
     steps:
       - uses: actions/download-artifact@v8
         with:
-          name: ${{ needs.build.outputs.artifact }}
+          pattern: MiniMuse-v${{ needs.build.outputs.version }}-*
+          merge-multiple: true
           path: release
 
       - name: Create release for the tested commit

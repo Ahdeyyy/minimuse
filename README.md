@@ -15,7 +15,8 @@ Add a music folder, add individual files, or drop files/folders onto the window.
 - Albums: open **Albums** in the sidebar and search by album/artist. Open a release for cover artwork that fades into the song list, artist and featured-artist credits from the tags, song count, and total duration. Its search matches only songs and artists within that album; **Play album** queues the whole release. The artwork scrolls away while search remains accessible. Album-artist tags group releases; folders distinguish albums when that tag is absent and keep compilations together. Disc/track tags order newly imported tracks; existing files use their filenames when those tags are unavailable.
 - Mini player: click the mini-player button at the right of the playback bar, press **Ctrl+M**, or select **Mini player** from the tray menu. Resize down to 260×180, use a wide playback strip, or enlarge it into an artwork view. Narrow layouts put shuffle/repeat in **Playback options** and volume/mute in a popover. It reuses the same playback engine and window and stays on top. The expand button or **Ctrl+M** restores the library's size and position. Closing follows the same close-to-tray setting.
 - Light/dark appearance and remembered library, queue, playlists, favorites, and preferences.
-- Custom draggable titlebar with matching window controls, native resize edges, and a transparent vinyl-record app/tray icon.
+- Custom draggable titlebar with matching window controls, native resize edges, and a transparent vinyl-record app/tray icon. Linux uses a frameless window so the desktop does not add a second titlebar.
+- In-app notifications appear as dismissible, auto-expiring overlay toasts in both the library and mini player, without moving the controls or song list.
 - Song durations in the library, with readable selection colors in both themes. Existing libraries fill in durations in the background.
 - **Playing now** opens a dedicated song screen with album artwork, audio details, and lyrics. Click the current song again in the library, click it in the bottom playback bar, or press **Ctrl+L** to open it without restarting playback; **Back to library** returns to your previous view.
 - Artwork comes from embedded MP3/FLAC/Ogg covers, or a song-named image or `cover`, `folder`, `front`, `album`, or `artwork` image beside the music (JPEG, PNG, WebP). Missing artwork uses the record illustration. Visible covers load in a worker; the cache holds at most 48 images resized to 512 pixels.
@@ -87,7 +88,7 @@ The build produces the Windows executable and installer under `build/windows-amd
 
 ### Automatic releases
 
-`.github/workflows/release.yml` tests, vets, and builds Windows x64 on pull requests targeting `master` and on every push to `master`. Only successful pushes publish a GitHub release, including pushes caused by merging a PR. The tag targets the exact tested commit. Publishing uses the built-in `GITHUB_TOKEN` with `contents: write`; no personal access token is needed.
+`.github/workflows/release.yml` tests, vets, and builds Windows x64, Linux x64/ARM64, and macOS universal (Intel and Apple Silicon) on pull requests targeting `master` and on every push to `master`. Windows, Linux, and macOS use native OS runners; Linux ARM64 is cross-compiled on Linux x64 and macOS packages both architectures. Only successful pushes publish a GitHub release after all builds pass, including pushes caused by merging a PR. The tag targets the exact tested commit. Publishing uses the built-in `GITHUB_TOKEN` with `contents: write`; no personal access token is needed.
 
 The release version uses the major/minor version from `mygo.json` and adds the workflow run number to its patch number. With the configured `0.1.0`, run 1 produces `v0.1.1`, run 2 produces `v0.1.2`, and so on. PR checks also consume run numbers, so release numbers can have gaps. Reruns keep their version; publishing an existing release fails rather than replacing its files. Change the major/minor in `mygo.json` when starting a new release series; keep this workflow's filename stable so its run counter continues.
 
@@ -95,9 +96,12 @@ Each release includes:
 
 - `MiniMuse-v0.1.1.exe`: portable executable.
 - `MiniMuse-setup-v0.1.1.exe`: installer.
-- `MiniMuse-v0.1.1.sha256`: SHA-256 checksums for both downloads.
+- `MiniMuse-v0.1.1-linux-amd64.tar.gz` and `MiniMuse-v0.1.1-linux-arm64.tar.gz`: Linux executables, resources, and desktop integration files. Extract and run `./minimuse` from the extracted directory.
+- `MiniMuse-v0.1.1-linux-amd64.deb` and `MiniMuse-v0.1.1-linux-arm64.deb`: Debian/Ubuntu/Pop!_OS packages.
+- `MiniMuse-v0.1.1-darwin-universal.dmg`: macOS app for Intel and Apple Silicon. The bundle uses ad hoc signing; Developer ID signing and notarization are not configured.
+- `MiniMuse-v0.1.1-<platform>.sha256`: SHA-256 checksums for each platform's downloads.
 
-To build the same release files locally, run `./scripts/build-release.ps1` (the configured version), or `./scripts/build-release.ps1 -BuildNumber 1` (the configured patch plus 1). Files go to `build/releases/v<version>/`; the script restores `mygo.json` after building. MyGo downloads NSIS on Windows if needed. These releases target Windows x64.
+To build the same release files locally with PowerShell, run `./scripts/build-release.ps1` (Windows x64, configured version), or `./scripts/build-release.ps1 -BuildNumber 1` (the configured patch plus 1). Pass `-Platform linux/amd64`, `-Platform linux/arm64`, or `-Platform darwin/universal` for the other targets. Files go to `build/releases/v<version>/<platform>/`; the script restores `mygo.json` after building. MyGo downloads NSIS on Windows if needed. Building the macOS disk image requires macOS.
 
 Optional hardware and visual checks:
 

@@ -55,7 +55,6 @@ func (a *app) setMini(enabled bool) {
 }
 
 func (a *app) miniView(c *ui.Context) {
-	t := c.Theme()
 	tr := a.current()
 	w, h := c.Size()
 	wide := w >= 640
@@ -117,9 +116,6 @@ func (a *app) miniView(c *ui.Context) {
 					}
 				})
 				a.seekControl(c)
-			}
-			if a.notice != "" && h >= 210 {
-				ui.Text(c, a.notice).FillWidth().FontSize(10).TextColor(t.TextMuted).SingleLine().Tooltip(a.notice)
 			}
 		})
 	})
