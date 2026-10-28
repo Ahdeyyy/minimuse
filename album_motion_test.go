@@ -54,7 +54,7 @@ func TestAlbumDetails(t *testing.T) {
 				if len(a.filtered) != 0 || !tt.HasText("No matching songs. Try another song or artist.") {
 					t.Fatal("album search still matches album tags", a.filtered)
 				}
-				tt.Key(ui.Ctrl, ui.KeyA)
+				tt.Key(ui.Cmd, ui.KeyA)
 				tt.Type("Guest Two")
 				if !slices.Equal(a.filtered, []int{1}) {
 					t.Fatal("song search did not select the guest's track", a.filtered)

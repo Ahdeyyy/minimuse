@@ -70,7 +70,7 @@ func TestTitlebarSearch(t *testing.T) {
 				a.songScreen, a.settings, a.playlistDialog, a.mini = false, false, false, false
 				tt.Frame()
 				tt.Key(ui.Ctrl, ui.KeyF)
-				tt.Key(ui.Ctrl, ui.KeyA)
+				tt.Key(ui.Cmd, ui.KeyA)
 				tt.Type("Artist 1")
 				if a.query != "Artist 1" || len(a.filtered) != 2 {
 					t.Fatal("search did not recover focus after returning to the library", a.query, a.filtered)

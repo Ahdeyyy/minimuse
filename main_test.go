@@ -529,7 +529,7 @@ func TestLyricTimingControls(t *testing.T) {
 	}
 	// NumberInput contains the text field followed by its step buttons.
 	tt.ClickAt(offsetField.X+24, offsetField.Y+offsetField.H/2)
-	tt.Key(ui.Ctrl, ui.KeyA)
+	tt.Key(ui.Cmd, ui.KeyA)
 	tt.Type("1250")
 	tt.Key(0, ui.KeyEnter)
 	if a.lyricOffset() != 1250*time.Millisecond {
