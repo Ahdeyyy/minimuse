@@ -5,6 +5,6 @@
   "version": "0.1.0",
   "out": "build",
   "fileAssociations": [
-    { "ext": ["mp3", "flac", "wav", "ogg", "oga"], "name": "Music", "role": "Viewer" }
+    { "ext": ["mp3", "flac", "wav", "ogg", "oga", "m4a"], "name": "Music", "role": "Viewer" }
   ]
 }

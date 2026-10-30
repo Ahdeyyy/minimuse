@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/egoist/mygo"
+	"github.com/egoist/mygo/plugins/updater/native"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -19,6 +20,7 @@ import (
 var appIcon []byte
 
 func main() {
+	mygo.Use(native.Plugin)
 	base, err := os.UserConfigDir()
 	if err != nil {
 		log.Fatal(err)
@@ -84,6 +86,7 @@ func main() {
 		}
 		a.visible = !*startInTray
 		a.window = mygo.NewWindow(a.windowOptions(runtime.GOOS, bg, *startInTray))
+		a.setupUpdates()
 		a.start()
 		a.setupTray()
 		if *startInTray && a.tray == nil {

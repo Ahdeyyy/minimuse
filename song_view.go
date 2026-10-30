@@ -297,7 +297,7 @@ func (a *app) lyricsView(c *ui.Context) {
 			a.scrollToLyric(c, active)
 		}
 	}
-	ui.List(c.Key(a.lyricsPath+"/"+a.lyricMode), &a.lyricList, len(a.lyrics.Lines)).TrackScroll(&a.lyricScroll).Label("Lyric lines").FillWidth().Grow(1).MinHeight(0).Padding(16, 16, 20, 0).ItemKey(func(i int) any { return i }).Rows(func(row ui.ListRow) {
+	ui.List(c.Key(a.lyricsPath+"/"+a.lyricMode), &a.lyricList, len(a.lyrics.Lines)).TrackScroll(&a.lyricScroll).Label("Lyric lines").FillWidth().Grow(1).MinHeight(0).Padding(16, 28, 20, 0).ItemKey(func(i int) any { return i }).Rows(func(row ui.ListRow) {
 		c := row.Context
 		line := a.lyrics.Lines[row.Index]
 		isActive := a.lyricMode != "Static" && line.singing(position)

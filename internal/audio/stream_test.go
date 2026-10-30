@@ -91,7 +91,7 @@ func TestFloatOutputDurationAndSeek(t *testing.T) {
 }
 
 func TestCodecFixtures(t *testing.T) {
-	for _, ext := range []string{"mp3", "flac", "ogg"} {
+	for _, ext := range []string{"mp3", "flac", "ogg", "m4a"} {
 		t.Run(ext, func(t *testing.T) {
 			s, f, err := Decode(filepath.Join("testdata", "tone."+ext))
 			if err != nil {

@@ -136,7 +136,7 @@ func (a *app) albumOverview(c *ui.Context, width float32) {
 	panelWidth := width - 230
 	columns := max(1, int((panelWidth-32)/172))
 	rows := (len(a.visibleAlbums) + columns - 1) / columns
-	ui.List(c.Key("album-grid"), &a.albumList, rows).FillWidth().Grow(1).MinHeight(0).Padding(8, 36, 20, 20).
+	ui.List(c.Key("album-grid"), &a.albumList, rows).FillWidth().Grow(1).MinHeight(0).Padding(8, 48, 20, 20).
 		ItemKey(func(i int) any { return a.albums[a.visibleAlbums[i*columns]].Key }).Rows(func(row ui.ListRow) {
 		c := row.Context
 		ui.Row(c).FillWidth().Height(244).Gap(12).Padding(0, 0, 12, 0).Children(func() {
@@ -275,7 +275,7 @@ func (a *app) albumDetail(c *ui.Context, width float32, g albumGroup) {
 			return
 		}
 		a.songTableHeader(c, width)
-		ui.List(c.Key("album/"+g.Key), &a.albumTracks, len(a.filtered)).FillWidth().Grow(1).MinHeight(0).Padding(8, 28, 8, 12).
+		ui.List(c.Key("album/"+g.Key), &a.albumTracks, len(a.filtered)).FillWidth().Grow(1).MinHeight(0).Padding(8, 40, 8, 12).
 			ItemKey(func(i int) any { return a.prefs.Tracks[a.filtered[i]].Path }).Rows(func(row ui.ListRow) {
 			a.songRow(row.Context, row.Index, row.Selected(), width)
 		}).OnChange(func() { a.selected = a.albumSelected }).OnSubmit(func() {

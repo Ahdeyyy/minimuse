@@ -67,6 +67,7 @@ type app struct {
 	mainMaximized    bool
 	miniBounds       mygo.Rectangle
 	settings         bool
+	updates          updateSettings
 	foldersOpen      bool
 	folderList       ui.ListState
 	playlistDialog   bool
@@ -439,7 +440,7 @@ func (a *app) browse(directory bool) {
 		return
 	}
 	go func() {
-		paths, err := mygo.Dialog.Open(mygo.OpenDialogOptions{Parent: a.window, Title: "Add music", Directory: directory, Multiple: true, Filters: []mygo.FileFilter{{Name: "Music", Extensions: []string{"mp3", "flac", "wav", "ogg", "oga"}}}})
+		paths, err := mygo.Dialog.Open(mygo.OpenDialogOptions{Parent: a.window, Title: "Add music", Directory: directory, Multiple: true, Filters: []mygo.FileFilter{{Name: "Music", Extensions: []string{"mp3", "flac", "wav", "ogg", "oga", "m4a"}}}})
 		if a.closed.Load() {
 			return
 		}

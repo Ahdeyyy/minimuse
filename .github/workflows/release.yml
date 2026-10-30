@@ -62,6 +62,8 @@ jobs:
         id: package
         env:
           BUILD_PLATFORM: ${{ matrix.platform }}
+          MYGO_UPDATER_PUBLIC_KEY: ${{ vars.MYGO_UPDATER_PUBLIC_KEY }}
+          MYGO_UPDATER_PRIVATE_KEY: ${{ github.event_name == 'push' && secrets.MYGO_UPDATER_PRIVATE_KEY || '' }}
         run: ./scripts/build-release.ps1 -BuildNumber $env:GITHUB_RUN_NUMBER -Platform $env:BUILD_PLATFORM
 
       - name: Save release files

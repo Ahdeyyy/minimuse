@@ -75,6 +75,8 @@ func Decode(path string) (beep.StreamSeekCloser, beep.Format, error) {
 		}
 	case ".flac":
 		s, format, err = decodeFLAC(f)
+	case ".m4a":
+		s, format, err = decodeM4A(f)
 	case ".ogg", ".oga":
 		s, format, err = vorbis.Decode(f)
 	case ".wav":

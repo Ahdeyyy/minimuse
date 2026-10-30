@@ -32,8 +32,9 @@ func TestDurationsAndFolderRefresh(t *testing.T) {
 	}
 	copyTone("tone.flac")
 	copyTone("tone.ogg")
+	copyTone("tone.m4a")
 	newTracks, _, err := scanTracks(context.Background(), []string{dir, dir}, map[string]bool{pathKey(first[0].Path): true})
-	if err != nil || len(newTracks) != 2 {
+	if err != nil || len(newTracks) != 3 {
 		t.Fatal(newTracks, err)
 	}
 	for _, track := range newTracks {

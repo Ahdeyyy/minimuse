@@ -22,6 +22,17 @@ if ($patch -gt 65535) {
 }
 $version = '{0}.{1}.{2}' -f $Matches[1], $Matches[2], $patch
 $config.version = $version
+# Keep signing material in CI, never in the repository. PR builds need only
+# the public key; trusted push builds also receive the signing secret.
+if ($env:MYGO_UPDATER_PUBLIC_KEY) {
+    $config | Add-Member -Force -NotePropertyName updates -NotePropertyValue @{
+        publicKey = $env:MYGO_UPDATER_PUBLIC_KEY
+        github = 'Ahdeyyy/minimuse'
+    }
+}
+if ($env:MYGO_UPDATER_PRIVATE_KEY -and !$config.updates.publicKey) {
+    throw 'Set MYGO_UPDATER_PUBLIC_KEY alongside the update signing key.'
+}
 $tag = "v$version"
 $target = $Platform.Replace('/', '-')
 $relativeDirectory = "build/releases/$tag/$target"
@@ -56,6 +67,18 @@ try {
         if (!(Test-Path -LiteralPath (Join-Path $platformDirectory $file.Source) -PathType Leaf)) {
             throw "Required release file is missing: $($file.Source)"
         }
+    }
+
+    # Manifest URLs use MyGo's original filenames. Publish signed archives,
+    # deltas and manifests without renaming them alongside the friendly downloads.
+    if ($env:MYGO_UPDATER_PRIVATE_KEY) {
+        $manifest = Join-Path $platformDirectory "update-$target.json"
+        if (!(Test-Path -LiteralPath $manifest -PathType Leaf)) {
+            throw "Signed update manifest is missing: $manifest"
+        }
+        $files += Get-ChildItem -LiteralPath $platformDirectory -File | Where-Object {
+            $_.Name -like 'update-*.json' -or $_.Name -like '*.tar.gz' -or $_.Name -like '*.delta'
+        } | ForEach-Object { @{ Source = $_.Name; Name = $_.Name } }
     }
 
     New-Item -ItemType Directory -Path $releaseDirectory -Force | Out-Null

@@ -8,7 +8,7 @@ Download `MiniMuse-v<version>.exe` (portable) or `MiniMuse-setup-v<version>.exe`
 
 Add a music folder, add individual files, or drop files/folders onto the window. Double-click a song or press Enter in the song list to play it. Search matches titles, artists, and albums.
 
-- MP3, FLAC, WAV (integer PCM and floating point), and Ogg Vorbis (`.ogg`, `.oga`). Mono and stereo sources are supported.
+- MP3, FLAC, WAV (integer PCM and floating point), Ogg Vorbis (`.ogg`, `.oga`), and AAC-LC in M4A (`.m4a`). Mono and stereo sources are supported. M4A playback is built in and needs no external FFmpeg installation; HE-AAC, Apple Lossless (ALAC), and DRM-protected M4A are not supported.
 - Play/pause, seek, volume/mute, previous/next, shuffle without repeats within a cycle, and repeat off/all/one.
 - Reopening restores the current song at its saved playback position. Playing sessions resume automatically; paused sessions stay paused. Opening music files explicitly starts those files instead.
 - Favorites, editable queue, and named playlists. Open Queue and use its `+` button to save a mix. A song's menu adds it to the queue, plays it next, or adds it to a saved playlist. Queue menus move songs up/down or remove them. Playlist menus remove songs; right-click a playlist to delete it.
@@ -88,6 +88,10 @@ The build produces the Windows executable and installer under `build/windows-amd
 
 ### Automatic releases
 
+Settings includes automatic update checks, optional automatic installation, and a manual **Check for updates** button. Checks run shortly after launch and daily. The native update window shows release notes, download progress, errors, and the option to restart. Preferences are retained by MyGo in its user data directory. Development builds, unsigned builds, and installs without write access show an unavailable message; package manager installs should use their package manager.
+
+To enable signed updates for releases, run `go tool mygo keygen`, keep the generated private key safe outside this repository, and set the GitHub Actions repository variable `MYGO_UPDATER_PUBLIC_KEY` to the public key and repository secret `MYGO_UPDATER_PRIVATE_KEY` to the private key. The release script embeds the public key and the `Ahdeyyy/minimuse` feed and publishes MyGo's signed archives and `update-<platform>.json` manifests using their original filenames. Only push builds receive the private key; PR builds never sign. Existing unsigned installations need a one-time manual upgrade to a build with the public key. Local signed builds use the same environment variables. Without these keys the workflow continues producing ordinary downloads with automatic updates unavailable.
+
 `.github/workflows/release.yml` tests, vets, and builds Windows x64, Linux x64/ARM64, and macOS universal (Intel and Apple Silicon) on pull requests targeting `master` and on every push to `master`. Windows, Linux, and macOS use native OS runners; Linux ARM64 is cross-compiled on Linux x64 and macOS packages both architectures. Only successful pushes publish a GitHub release after all builds pass, including pushes caused by merging a PR. The tag targets the exact tested commit. Publishing uses the built-in `GITHUB_TOKEN` with `contents: write`; no personal access token is needed.
 
 The release version uses the major/minor version from `mygo.json` and adds the workflow run number to its patch number. With the configured `0.1.0`, run 1 produces `v0.1.1`, run 2 produces `v0.1.2`, and so on. PR checks also consume run numbers, so release numbers can have gaps. Reruns keep their version; publishing an existing release fails rather than replacing its files. Change the major/minor in `mygo.json` when starting a new release series; keep this workflow's filename stable so its run counter continues.
@@ -116,8 +120,10 @@ go test -run TestCaptureUI -count=1 .
 go test -run '^$' -bench . -benchmem ./internal/audio
 ```
 
-Tests cover decoder/seek behavior for all four formats, retained 24-bit precision, file handle cleanup, queue boundaries, stale playback events, shuffle cycles, persistence replacement/corruption, metadata import, playlists, keyboard actions, and a 10,000-song virtualized library. The opt-in sound-device test is muted and exercises play, pause, seek, resume, completion, and optional sustained playback. Native close-to-tray and restore were also checked on Windows. The race detector could not run here because no C compiler is installed.
+Tests cover decoder/seek behavior for all supported formats, retained 24-bit lossless precision, M4A presentation trimming and metadata, file handle cleanup, queue boundaries, stale playback events, shuffle cycles, persistence replacement/corruption, metadata import, playlists, keyboard actions, and a 10,000-song virtualized library. The opt-in sound-device test is muted and exercises play, pause, seek, resume, completion, and optional sustained playback. Native close-to-tray and restore were also checked on Windows. The race detector could not run here because no C compiler is installed.
 
-AAC/M4A, WMA, Opus, network streams, exclusive output, gapless transitions, and OS media-key integration are not implemented.
+HE-AAC, ALAC, raw AAC (`.aac`), WMA, Opus, network streams, exclusive output, gapless transitions, and OS media-key integration are not implemented. The M4A decoder produces 16-bit PCM before conversion to the float output path; imports include iTunes title, artist, album, album artist, track/disc numbers, and embedded cover art.
+
+M4A uses [go-m4a](https://github.com/tphakala/go-m4a) v0.8.0 (MIT), [go-aac](https://github.com/tphakala/go-aac) v0.7.1 (LGPL-2.1-or-later, with BSD portions), and simd v1.14.0 (MIT). License texts ship in `resources/licenses/`. These libraries are unmodified; their exact versions and checksums are pinned in `go.mod` and `go.sum`. To rebuild with a modified codec, replace its module with a local checkout using `go mod edit -replace github.com/tphakala/go-aac=<path>`, then run the development build commands above.
 
 Martian Grotesk ships under its OFL license in `resources/fonts/OFL.txt`. Codec test fixtures and their MIT license are attributed in `internal/audio/testdata/`.

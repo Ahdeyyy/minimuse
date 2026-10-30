@@ -50,7 +50,7 @@ func TestCrossfadePreferencesAndSettings(t *testing.T) {
 	if f.crossfade != 0 {
 		t.Fatal("disabling crossfade did not reach the engine")
 	}
-	click(t, tt, "Done")
+	click(t, tt, "Close settings")
 	tt.Frame()
 	click(t, tt, "Settings")
 	tt.Frame()

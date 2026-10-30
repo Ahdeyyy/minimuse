@@ -12,6 +12,8 @@ import (
 	"strings"
 	"time"
 
+	"minimuse/internal/audio"
+
 	"github.com/egoist/mygo/ui"
 	"golang.org/x/image/draw"
 )
@@ -200,6 +202,9 @@ func embeddedArtwork(path string) []byte {
 		return nil
 	}
 	defer f.Close()
+	if strings.EqualFold(filepath.Ext(path), ".m4a") {
+		return audio.M4ATags(f, maxArtworkBytes)["covr"]
+	}
 	var head [10]byte
 	if _, err := io.ReadFull(f, head[:]); err != nil {
 		return nil

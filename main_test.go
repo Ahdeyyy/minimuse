@@ -105,7 +105,7 @@ func TestLibraryUI(t *testing.T) {
 	if !a.theme.Dark {
 		t.Fatal("theme did not change")
 	}
-	click(t, tt, "Done")
+	click(t, tt, "Close settings")
 	tt.Frame()
 	tt.Frame()
 }
@@ -427,11 +427,14 @@ func TestCompactSettingsWithManyFolders(t *testing.T) {
 	if !a.foldersOpen || !tt.HasText("C:/Music/Collection 0") || tt.HasText("C:/Music/Collection 199") {
 		t.Fatal("expanded folders should use a bounded virtual list")
 	}
-	r, ok := tt.Find("Done")
-	if !ok || r.Y < 0 || r.Y+r.H > 580 {
-		t.Fatal("settings footer clipped", r)
+	if _, ok := tt.Find("Done"); ok {
+		t.Fatal("settings should close through its header button")
 	}
-	click(t, tt, "Done")
+	r, ok := tt.Find("Close settings")
+	if !ok || r.Y < 0 || r.Y+r.H > 580 {
+		t.Fatal("settings close button clipped", r)
+	}
+	click(t, tt, "Close settings")
 	tt.Frame()
 	tt.Frame()
 	if a.settings {

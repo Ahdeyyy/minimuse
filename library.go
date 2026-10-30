@@ -47,7 +47,7 @@ func pathKey(path string) string {
 }
 func supported(path string) bool {
 	switch strings.ToLower(filepath.Ext(path)) {
-	case ".mp3", ".flac", ".wav", ".ogg", ".oga":
+	case ".mp3", ".flac", ".wav", ".ogg", ".oga", ".m4a":
 		return true
 	}
 	return false
@@ -110,6 +110,21 @@ func readTrack(path string) track {
 		return t
 	}
 	defer f.Close()
+	if strings.EqualFold(filepath.Ext(path), ".m4a") {
+		tags := audio.M4ATags(f, 0)
+		for atom, id := range map[string]string{"\xa9nam": "TIT2", "\xa9ART": "TPE1", "\xa9alb": "TALB", "aART": "TPE2"} {
+			if b := tags[atom]; len(b) > 0 {
+				setTag(&t, id, string(b))
+			}
+		}
+		if b := tags["trkn"]; len(b) >= 4 {
+			t.Number = int(binary.BigEndian.Uint16(b[2:4]))
+		}
+		if b := tags["disk"]; len(b) >= 4 {
+			t.Disc = int(binary.BigEndian.Uint16(b[2:4]))
+		}
+		f.Seek(0, io.SeekStart)
+	}
 	var header [10]byte
 	_, err = io.ReadFull(f, header[:])
 	if err == nil && string(header[:3]) == "ID3" && (header[3] == 3 || header[3] == 4) && header[5]&0xc0 == 0 {

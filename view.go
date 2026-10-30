@@ -195,7 +195,7 @@ func (a *app) libraryView(c *ui.Context, width float32) {
 		return
 	}
 	a.songTableHeader(c, width)
-	ui.List(c.Key(a.section), &a.list, len(a.filtered)).FillWidth().Grow(1).MinHeight(0).Padding(8, 28, 8, 12).
+	ui.List(c.Key(a.section), &a.list, len(a.filtered)).FillWidth().Grow(1).MinHeight(0).Padding(8, 40, 8, 12).
 		ItemKey(func(i int) any { return a.prefs.Tracks[a.filtered[i]].Path }).Rows(func(row ui.ListRow) {
 		a.songRow(row.Context, row.Index, row.Selected(), width)
 	}).OnSubmit(func() {
@@ -490,13 +490,13 @@ func (a *app) settingsDialog(c *ui.Context) {
 	ui.DialogBase(c.Key("settings"), &a.settings, func(backdrop, panel ui.Element) {
 		width, height := c.Size()
 		backdrop.Background(ui.RGBA(0, 0, 0, .2))
-		panel.Label("Settings dialog").Width(min(640, width-48)).MaxHeight(height-32).Padding(24).Gap(16).Radius(12).Background(c.Theme().Surface).Border(1, c.Theme().Border)
+		panel.Label("Settings dialog").Width(min(760, width-48)).MaxHeight(height-32).Padding(24).Gap(16).Radius(12).Background(c.Theme().Surface).Border(1, c.Theme().Border)
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Children(func() {
 			ui.Text(c, "Settings").FontSize(20).Bold()
 			ui.Spacer(c).Grow(1)
 			iconButton(c, "close", "Close settings", false).OnClick(func() { a.settings = false })
 		})
-		ui.Scroll(c).FillWidth().Grow(1).MinHeight(0).Padding(0, 16, 0, 0).Children(func() {
+		ui.Scroll(c).FillWidth().Grow(1).MinHeight(0).Padding(0, 28, 0, 0).Children(func() {
 			ui.Column(c).FillWidth().Gap(16).Children(func() {
 				ui.Checkbox(c, &a.prefs.CloseToTray, "Close to tray").OnChange(a.persist)
 				ui.Text(c, "Keep playing when you close the window. Use Quit MiniMuse in the tray menu to fully exit.").FillWidth().FontSize(12).TextColor(c.Theme().TextMuted).LineHeight(1.6)
@@ -524,7 +524,7 @@ func (a *app) settingsDialog(c *ui.Context) {
 					if len(a.prefs.Folders) == 0 {
 						ui.Text(c, "Add a folder from the library to keep it available for refresh.").FillWidth().FontSize(12).TextColor(c.Theme().TextMuted)
 					} else {
-						ui.List(c.Key("saved-folders"), &a.folderList, len(a.prefs.Folders)).FillWidth().Height(float32(min(168, len(a.prefs.Folders)*42))).Padding(0, 16, 0, 0).ItemKey(func(i int) any { return a.prefs.Folders[i] }).Rows(func(row ui.ListRow) {
+						ui.List(c.Key("saved-folders"), &a.folderList, len(a.prefs.Folders)).FillWidth().Height(float32(min(168, len(a.prefs.Folders)*42))).Padding(0, 28, 0, 0).ItemKey(func(i int) any { return a.prefs.Folders[i] }).Rows(func(row ui.ListRow) {
 							c := row.Context
 							folder := a.prefs.Folders[row.Index]
 							ui.Row(c).FillWidth().Height(42).Gap(8).AlignItems(ui.Center).Children(func() {
@@ -534,10 +534,10 @@ func (a *app) settingsDialog(c *ui.Context) {
 						})
 					}
 				}).FillWidth()
+				a.updateControls(c)
 				ui.Text(c, "Keyboard").Bold()
 				ui.Text(c, "Space / Ctrl+P   Play / pause\nCtrl+← / →   Previous / next\nCtrl+M   Mini player\nCtrl+L   Playing now\nCtrl+R   Refresh folders\nCtrl+O   Add songs\nCtrl+F   Search\nCtrl+Q   Quit").FillWidth().FontSize(12).TextColor(c.Theme().TextMuted).LineHeight(1.8)
 			})
 		})
-		textButton(c, "check", "Done").OnClick(func() { a.settings = false })
 	})
 }
