@@ -97,7 +97,7 @@ func TestOverlappingLyricsRenderingAndSeeking(t *testing.T) {
 			a.lyricsPath = a.prefs.Current
 			a.lyrics = parseLyrics(overlappingLyrics)
 			a.lyricMode = "Words"
-			a.status.Position = 229500 * time.Millisecond
+			a.status.Position = 229600 * time.Millisecond
 			a.status.Duration = 6 * time.Minute
 			tt := ui.NewTester(a.view, width, 740)
 			tt.Advance(time.Second)
@@ -109,7 +109,7 @@ func TestOverlappingLyricsRenderingAndSeeking(t *testing.T) {
 			tt.Advance(time.Second)
 			assertLyricAccent(t, tt, "Lyric line 1 word 5", a.theme.Accent, false)
 			assertLyricAccent(t, tt, "Lyric line 2 word 5", a.theme.Accent, true)
-			assertLyricAccent(t, tt, "Lyric line 3 word 1", a.theme.Accent, true)
+			assertLyricAccent(t, tt, "Lyric line 3 word 1", a.theme.Accent.Mix(a.theme.Text, .25).Mix(a.theme.Accent, 131.0/523), true)
 			captureUI(t, tt, fmt.Sprintf("lyrics-backing-overlap-%d", width))
 			if a.lyricActive != 1 {
 				t.Fatal("backing vocal interrupted follow", a.lyricActive)

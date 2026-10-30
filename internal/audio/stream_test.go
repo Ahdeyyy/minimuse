@@ -207,14 +207,29 @@ func TestRealDeviceLifecycle(t *testing.T) {
 		return Status{}
 	}
 	wait(func(s Status) bool { return s.Playing && s.Position > 200*time.Millisecond })
+	e.Scrub(true)
+	scrubbing := wait(func(s Status) bool { return s.Seeking })
+	time.Sleep(150 * time.Millisecond)
+	if got := e.Snapshot(); got.Position != scrubbing.Position || !got.Playing {
+		t.Fatal("scrubbing advanced audio or lost resume intent", got)
+	}
+	e.Seek(500 * time.Millisecond)
+	wait(func(s Status) bool { return s.Seeking && s.Position == 500*time.Millisecond })
+	e.Scrub(false)
+	wait(func(s Status) bool { return !s.Seeking && s.Position > 500*time.Millisecond })
 	e.Toggle()
 	paused := wait(func(s Status) bool { return !s.Playing })
 	time.Sleep(300 * time.Millisecond)
 	if e.Snapshot().Position != paused.Position {
 		t.Fatal("paused playback advanced")
 	}
+	e.Scrub(true)
 	e.Seek(time.Second)
+	e.Scrub(false)
 	wait(func(s Status) bool { return s.Position >= time.Second })
+	if e.Snapshot().Playing {
+		t.Fatal("scrubbing resumed paused playback")
+	}
 	e.Toggle()
 	wait(func(s Status) bool { return s.Playing })
 	wait(func(s Status) bool { return s.Ended })

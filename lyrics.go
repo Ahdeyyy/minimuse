@@ -246,6 +246,26 @@ func (line lyricLine) wordActive(index int, position time.Duration) bool {
 	return line.singing(position) && w.At <= position && position < w.End && strings.TrimSpace(w.Text) != ""
 }
 
+// Progress is cumulative and derived from playback time, never from which
+// frames happened to render. A skipped interval is fully filled on the next
+// frame, and seeking backwards reconstructs the fill without stale state.
+func (line lyricLine) wordProgress(index int, position time.Duration) float32 {
+	w := line.Words[index]
+	if position < w.At || strings.TrimSpace(w.Text) == "" {
+		return 0
+	}
+	end := min(w.End, line.End)
+	if end == lyricOpenEnd {
+		// A final word without a release stamp has no known duration.
+		// Finish its visual fill rather than dividing by an infinite interval.
+		end = w.At + 600*time.Millisecond
+	}
+	if end <= w.At || position >= end {
+		return 1
+	}
+	return float32(float64(position-w.At) / float64(end-w.At))
+}
+
 func decodeLyrics(b []byte) string {
 	if len(b) >= 2 && (b[0] == 255 && b[1] == 254 || b[0] == 254 && b[1] == 255) {
 		little := b[0] == 255
@@ -446,7 +466,6 @@ func (a *app) loadLyrics(online bool) {
 			}
 			a.lyricsBusy = false
 			a.lyrics = d
-			a.notice = "Lyrics loaded"
 			if err != nil {
 				a.notice = err.Error()
 			} else if len(d.Lines) == 0 {

@@ -78,12 +78,12 @@ func TestNotificationToastReplacesAndExpires(t *testing.T) {
 	if !tt.HasText("Added 3 songs") || tt.HasText("Reading your music…") {
 		t.Fatal("completion must replace the progress toast", tt.Texts())
 	}
-	tt.Advance(7 * time.Second)
+	tt.Advance(1400 * time.Millisecond)
 	tt.Frame()
 	if !tt.HasText("Added 3 songs") {
 		t.Fatal("replacement toast did not get a fresh timeout")
 	}
-	tt.Advance(2 * time.Second)
+	tt.Advance(200 * time.Millisecond)
 	tt.Frame()
 	tt.Frame()
 	if _, ok := tt.Find("Notification toast"); ok {

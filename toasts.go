@@ -10,7 +10,7 @@ func (a *app) toasts(c *ui.Context) {
 	if a.notice != "" {
 		// Reuse one toast so progress is replaced by its result and bursts of
 		// notifications cannot cover the compact player's controls.
-		c.AddToast(ui.Toast{ID: "app-notice", Title: a.notice, Timeout: 8 * time.Second})
+		c.AddToast(ui.Toast{ID: "app-notice", Title: a.notice, Timeout: 1500 * time.Millisecond})
 		a.notice = ""
 	}
 	t := c.Theme()

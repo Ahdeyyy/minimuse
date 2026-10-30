@@ -70,6 +70,7 @@ func TestSnapshotInterpolation(t *testing.T) {
 		{"worker stalled", base, time.Second, time.Second + statusInterval},
 		{"clock before sample", base, -time.Second, time.Second},
 		{"paused", Status{Position: time.Second}, time.Second, time.Second},
+		{"scrubbing", Status{Position: time.Second, Playing: true, Seeking: true}, time.Second, time.Second},
 		{"ended", Status{Position: time.Second, Playing: true, Ended: true}, time.Second, time.Second},
 		{"error", Status{Position: time.Second, Playing: true, Error: "device"}, time.Second, time.Second},
 		{"duration cap", Status{Position: 1990 * time.Millisecond, Duration: 2 * time.Second, Playing: true}, statusInterval, 2 * time.Second},

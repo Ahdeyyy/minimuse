@@ -18,6 +18,7 @@ import (
 type fakeEngine struct {
 	loads          []string
 	seeks          []time.Duration
+	scrubs         []bool
 	volume         float64
 	crossfade      time.Duration
 	snapshot       audio.Status
@@ -30,6 +31,7 @@ func (f *fakeEngine) Load(path string) bool     { f.loads = append(f.loads, path
 func (f *fakeEngine) Toggle()                   { f.toggles++ }
 func (f *fakeEngine) Stop()                     { f.stops++ }
 func (f *fakeEngine) Seek(d time.Duration)      { f.seeks = append(f.seeks, d) }
+func (f *fakeEngine) Scrub(active bool)         { f.scrubs = append(f.scrubs, active) }
 func (f *fakeEngine) Volume(v float64)          { f.volume = v }
 func (f *fakeEngine) Crossfade(d time.Duration) { f.crossfade = d }
 func (f *fakeEngine) Snapshot() audio.Status    { return f.snapshot }

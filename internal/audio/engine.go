@@ -15,6 +15,7 @@ type Status struct {
 	Playing                    bool
 	Ended                      bool
 	NearEnd                    bool // asks the queue for its next track once per playback/seek
+	Seeking                    bool // silent manual scrubbing; Playing retains the resume intent
 	Position, Duration         time.Duration
 	SampleRate, Bits, Channels int
 	Error                      string
@@ -104,6 +105,7 @@ func (e *Engine) Restore(path string, position time.Duration, playing bool) bool
 func (e *Engine) Toggle()              { e.send(command{kind: "toggle"}) }
 func (e *Engine) Stop()                { e.send(command{kind: "stop"}) }
 func (e *Engine) Seek(d time.Duration) { e.send(command{kind: "seek", value: d.Seconds()}) }
+func (e *Engine) Scrub(active bool)    { e.send(command{kind: "scrub", paused: active}) }
 func (e *Engine) Volume(v float64)     { e.send(command{kind: "volume", value: max(0, min(1, v))}) }
 func (e *Engine) Snapshot() Status {
 	s := e.status.Load()
@@ -115,7 +117,7 @@ func (e *Engine) Snapshot() Status {
 
 func (s playbackSnapshot) positionAt(now time.Time) Status {
 	state := s.status
-	if state.Playing && !state.Ended && state.Error == "" && !s.at.IsZero() {
+	if state.Playing && !state.Seeking && !state.Ended && state.Error == "" && !s.at.IsZero() {
 		// Smooth 60 Hz lyric updates between device samples. Stop extrapolating
 		// if a disk read, seek or device operation delays the worker.
 		state.Position += max(0, min(now.Sub(s.at), statusInterval))
@@ -307,8 +309,10 @@ func (e *Engine) run() {
 						publish(true)
 						continue
 					}
-					player.Play()
-					if outgoing != nil {
+					if !state.Seeking {
+						player.Play()
+					}
+					if outgoing != nil && !state.Seeking {
 						outgoing.Play()
 					}
 					timer.Reset(statusInterval)
@@ -329,6 +333,16 @@ func (e *Engine) run() {
 					releaseOutgoing()
 					applyVolume()
 				}
+			case "scrub":
+				state.Seeking = c.paused
+				if player != nil {
+					if state.Seeking {
+						releaseOutgoing()
+						player.PauseAndStopReading()
+					} else if state.Playing {
+						player.Play()
+					}
+				}
 			case "seek":
 				if player == nil {
 					continue
@@ -344,7 +358,7 @@ func (e *Engine) run() {
 			}
 			publish(c.kind != "volume")
 		case <-tick:
-			if player == nil {
+			if player == nil || state.Seeking || !state.Playing {
 				continue
 			}
 			if err := player.Err(); err != nil {

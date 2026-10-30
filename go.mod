@@ -7,6 +7,7 @@ tool github.com/egoist/mygo/cmd/mygo
 require (
 	github.com/ebitengine/oto/v3 v3.5.1
 	github.com/egoist/mygo v0.7.1
+	github.com/go-text/typesetting v0.3.5
 	github.com/gopxl/beep/v2 v2.1.1
 	github.com/mewkiz/flac v1.0.12
 	golang.org/x/image v0.46.0
@@ -14,7 +15,6 @@ require (
 
 require (
 	github.com/ebitengine/purego v0.11.1 // indirect
-	github.com/go-text/typesetting v0.3.5 // indirect
 	github.com/hajimehoshi/go-mp3 v0.3.4 // indirect
 	github.com/icza/bitio v1.1.0 // indirect
 	github.com/jfreymuth/oggvorbis v1.0.5 // indirect

@@ -354,8 +354,19 @@ func (a *app) seekControl(c *ui.Context) {
 	t := c.Theme()
 	ui.Row(c).FillWidth().Gap(8).AlignItems(ui.Center).Children(func() {
 		ui.Text(c, clockTime(a.status.Position)).FontSize(10).TextColor(t.TextMuted).Width(40).Shrink(0)
-		ui.Slider(c.Key("seek"), &a.seek, 0, max(1, a.status.Duration.Seconds())).Width(0).Grow(1).MinWidth(20).Label("Seek").Disabled(a.status.Duration == 0 || a.status.Ended).OnChange(func() {
+		slider := ui.Slider(c.Key("seek"), &a.seek, 0, max(1, a.status.Duration.Seconds())).Width(0).Grow(1).MinWidth(20).Label("Seek").Disabled(a.status.Duration == 0 || a.status.Ended)
+		_, _, pressed := slider.Dragged()
+		if pressed != a.seeking {
+			a.seeking = pressed
 			if a.engine != nil {
+				if !pressed {
+					a.engine.Seek(time.Duration(a.seek * float64(time.Second)))
+				}
+				a.engine.Scrub(pressed)
+			}
+		}
+		slider.OnChange(func() {
+			if a.engine != nil && !a.seeking {
 				a.engine.Seek(time.Duration(a.seek * float64(time.Second)))
 			}
 		})

@@ -22,6 +22,7 @@ type playbackEngine interface {
 	Toggle()
 	Stop()
 	Seek(time.Duration)
+	Scrub(bool)
 	Volume(float64)
 	Crossfade(time.Duration)
 	Snapshot() audio.Status
@@ -77,6 +78,7 @@ type app struct {
 	bag              []string
 	history          []string
 	seek             float64
+	seeking          bool
 	muted            bool
 	saveTimer        *time.Timer
 	saveGeneration   uint64
@@ -192,7 +194,9 @@ func (a *app) start() {
 						s := a.engine.Snapshot()
 						if s.Path == a.prefs.Current {
 							a.status = s
-							a.seek = s.Position.Seconds()
+							if !a.seeking {
+								a.seek = s.Position.Seconds()
+							}
 						}
 					}
 				})
@@ -547,7 +551,9 @@ func (a *app) acceptStatus(s audio.Status) {
 	previous := a.status
 	wasPlaying := a.prefs.Playing
 	a.status = s
-	a.seek = s.Position.Seconds()
+	if !a.seeking {
+		a.seek = s.Position.Seconds()
+	}
 	a.rememberPlayback(s)
 	if s.Path != previous.Path || s.Playing != previous.Playing || s.Playing != wasPlaying || s.Ended || s.Error != "" || s.NearEnd {
 		a.persist()

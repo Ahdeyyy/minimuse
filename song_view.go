@@ -5,8 +5,10 @@ import (
 	"math"
 	"strings"
 	"time"
+	"unicode/utf16"
 
 	"github.com/egoist/mygo/ui"
+	"github.com/go-text/typesetting/segmenter"
 )
 
 // Non-bouncing springs retain velocity when a new line or word arrives
@@ -15,8 +17,46 @@ var lyricLineMotion = ui.Animation{Spring: ui.SpringOptions{Duration: 650 * time
 var lyricWordMotion = ui.Animation{Spring: ui.SpringOptions{Duration: 280 * time.Millisecond}}
 
 type lyricRowLabels struct {
-	line  string
-	words []string
+	line   string
+	words  []string
+	fills  []lyricWordFill
+	ranges []ui.TextInputRange
+	glow   lyricGlow
+}
+
+// Keep span boundaries fixed throughout playback so fill updates only change
+// paint, not shaping, wrapping, hit areas, or accessibility word identity.
+type lyricWordFill struct {
+	spans []ui.Span
+	sung  int
+}
+
+func newLyricWordFill(text string) lyricWordFill {
+	var seg segmenter.Segmenter
+	seg.Init([]rune(text))
+	iter := seg.GraphemeIterator()
+	var fill lyricWordFill
+	for iter.Next() {
+		cluster := string(iter.Grapheme().Text)
+		fill.spans = append(fill.spans, ui.Span{Text: cluster})
+		if strings.TrimSpace(cluster) != "" {
+			fill.sung++
+		}
+	}
+	return fill
+}
+
+func (fill *lyricWordFill) paint(progress float32, base, accent ui.Color) []ui.Span {
+	remaining := progress * float32(fill.sung)
+	for i := range fill.spans {
+		amount := float32(0)
+		if strings.TrimSpace(fill.spans[i].Text) != "" {
+			amount = max(0, min(1, remaining))
+			remaining--
+		}
+		fill.spans[i].Color = base.Mix(accent, amount)
+	}
+	return fill.spans
 }
 
 func (a *app) stopLyricScroll() {
@@ -238,8 +278,16 @@ func (a *app) lyricsView(c *ui.Context) {
 			labels := &a.lyricLabels[i]
 			labels.line = fmt.Sprintf("Lyric line %d", i+1)
 			labels.words = make([]string, len(line.Words))
+			labels.fills = make([]lyricWordFill, len(line.Words))
+			labels.ranges = make([]ui.TextInputRange, len(line.Words))
+			labels.glow.text = line.Text
+			offset := 0
 			for j := range line.Words {
 				labels.words[j] = fmt.Sprintf("Lyric line %d word %d", i+1, j+1)
+				labels.fills[j] = newLyricWordFill(line.Words[j].Text)
+				end := offset + len(utf16.Encode([]rune(line.Words[j].Text)))
+				labels.ranges[j] = ui.TextInputRange{Start: offset, End: end}
+				offset = end
 			}
 		}
 	}
@@ -270,43 +318,81 @@ func (a *app) lyricsView(c *ui.Context) {
 		}
 		b := ui.ButtonBase(c).Bind(&a.lyricRows[row.Index]).Label(a.lyricLabels[row.Index].line).FillWidth().Padding(14, 4).Radius(t.Radius).Border(0, ui.Transparent).Background(ui.Transparent).TextColor(color)
 		b.Children(func() {
-			text := ui.RichText(c).FontSize(fontSize).LineHeight(1.5).FillWidth().TransformOrigin(0, .5).AnimatePose(pose, lyricLineMotion)
-			text.TextColor(text.AnimateColor("line-color", color, lyricLineMotion))
-			if a.lyricMode != "Static" {
-				text.Bold()
-			}
-			text.Children(func() {
-				if a.lyricMode == "Words" && len(line.Words) > 0 {
-					for i, w := range line.Words {
-						wordColor := color
-						wordPose := ui.Pose{}
-						if isActive {
-							wordColor = t.TextMuted
+			ui.Grid(c).Columns(1).FillWidth().Children(func() {
+				drawText := func(glow bool) {
+					key := "text"
+					if glow {
+						key = "glow"
+					}
+					text := ui.RichText(c.Key(key)).ColumnStart(1).RowStart(1).FontSize(fontSize).LineHeight(1.5).FillWidth().TransformOrigin(0, .5).AnimatePose(pose, lyricLineMotion)
+					if glow {
+						// Paint a glyph halo behind the crisp paragraph. The transparent
+						// copy shares its layout, without changing spacing or hit areas.
+						fx := &a.lyricLabels[row.Index].glow
+						font := ui.Font{Family: t.Font, Size: fontSize, Weight: 700, LineHeight: 1.5}
+						if fx.font != font {
+							fx.font, fx.layout = font, nil
 						}
-						if isActive && w.At <= position {
-							wordColor = t.Text
+						fx.ranges = fx.ranges[:0]
+						fx.color = t.Accent
+						for i := range line.Words {
 							if line.wordActive(i, position) {
-								wordColor = t.Accent
-								wordPose = ui.Pose{Y: -2, Scale: 1.015}
+								fx.ranges = append(fx.ranges, a.lyricLabels[row.Index].ranges[i])
 							}
 						}
-						word := ui.Text(c.Key(i), w.Text).AnimatePose(wordPose, lyricWordMotion)
-						word.TextColor(word.AnimateColor("word-color", wordColor, lyricWordMotion))
-						if strings.TrimSpace(w.Text) != "" {
-							word.Label(a.lyricLabels[row.Index].words[i]).Focusable().Cursor(ui.CursorPointer).OnClick(func() {
-								if a.engine != nil {
-									a.engine.Seek(a.lyricSeekTime(w.At))
+						text.TextColor(ui.Transparent).Draw(fx.Paint).PassThrough().Role(ui.RoleNone)
+					} else {
+						text.TextColor(text.AnimateColor("line-color", color, lyricLineMotion))
+					}
+					if a.lyricMode != "Static" {
+						text.Bold()
+					}
+					text.Children(func() {
+						if a.lyricMode == "Words" && len(line.Words) > 0 {
+							for i, w := range line.Words {
+								wordPose := ui.Pose{}
+								singing := line.wordActive(i, position)
+								base, filled := t.TextMuted, t.Accent.Mix(t.Text, .75)
+								if singing {
+									wordPose = ui.Pose{Y: -2.5, Scale: 1.075}
+									// Make the whole current word identifiable from its first
+									// frame, while its fill continues towards the full accent.
+									base, filled = t.Accent.Mix(t.Text, .25), t.Accent
 								}
-							})
+								var word ui.Element
+								if glow {
+									word = ui.Text(c.Key(i), w.Text).TextColor(ui.Transparent).PassThrough().Role(ui.RoleNone)
+								} else {
+									spans := a.lyricLabels[row.Index].fills[i].paint(line.wordProgress(i, position), base, filled)
+									word = ui.RichText(c.Key(i), spans...)
+								}
+								word.TransformOrigin(.5, .65).AnimatePose(wordPose, lyricWordMotion)
+								if !glow && strings.TrimSpace(w.Text) != "" {
+									word.Label(a.lyricLabels[row.Index].words[i]).Focusable().Cursor(ui.CursorPointer).OnClick(func() {
+										if a.engine != nil {
+											a.engine.Seek(a.lyricSeekTime(w.At))
+										}
+									})
+								}
+							}
+						} else {
+							value := line.Text
+							if value == "" {
+								value = "♪"
+							}
+							ui.Text(c, value)
+						}
+					})
+				}
+				if a.lyricMode == "Words" {
+					for i := range line.Words {
+						if line.wordActive(i, position) {
+							drawText(true)
+							break
 						}
 					}
-				} else {
-					value := line.Text
-					if value == "" {
-						value = "♪"
-					}
-					ui.Text(c, value)
 				}
+				drawText(false)
 			})
 		})
 		b.OnClick(func() {
