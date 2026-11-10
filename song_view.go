@@ -168,9 +168,9 @@ func (a *app) songBackdrop(c *ui.Context, panel ui.Element) {
 	}
 	backdrop := art.backdrop
 	t := c.Theme()
-	opacity := float32(.86)
+	opacity := float32(.72)
 	if t.Dark {
-		opacity = .80
+		opacity = .64
 	}
 	veil := t.Surface.Alpha(opacity)
 	panel.Draw(func(p *ui.Painter, r ui.Rect) {

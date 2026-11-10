@@ -152,7 +152,7 @@ func artworkBitmap(b []byte) *image.RGBA {
 // cover's bounded cache lifetime and remains independent of the theme.
 func artworkBackdrop(img *image.RGBA) *ui.Bitmap {
 	bounds := img.Bounds()
-	scale := 64 / float64(max(bounds.Dx(), bounds.Dy()))
+	scale := 96 / float64(max(bounds.Dx(), bounds.Dy()))
 	w, h := max(1, int(float64(bounds.Dx())*scale)), max(1, int(float64(bounds.Dy())*scale))
 	src := image.NewRGBA(image.Rect(0, 0, w, h))
 	draw.ApproxBiLinear.Scale(src, src.Bounds(), img, bounds, draw.Src, nil)

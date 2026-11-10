@@ -56,7 +56,7 @@ func TestSongBackdrop(t *testing.T) {
 			// The theme veil keeps the background close to its original tone,
 			// even with a bright, highly saturated cover.
 			for _, pair := range [][2]uint8{{plain.R, shown.R}, {plain.G, shown.G}, {plain.B, shown.B}} {
-				if delta := int(pair[0]) - int(pair[1]); delta < -52 || delta > 52 {
+				if delta := int(pair[0]) - int(pair[1]); delta < -96 || delta > 96 {
 					t.Fatalf("backdrop overwhelms the theme: plain %v, backdrop %v", plain, shown)
 				}
 			}
