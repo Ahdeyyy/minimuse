@@ -85,6 +85,13 @@ type app struct {
 	saveGeneration   uint64
 	pulse            chan time.Duration
 	songScreen       bool
+	vinylAngle       float64 // Accumulated record rotation in degrees.
+	vinylPosition    float64 // Playback seconds the angle last accounted for.
+	vinylPath        string
+	vinylPlaying     bool
+	vinylClock       vinylClock
+	vinylOverlays    map[vinylOverlayKey]*ui.Bitmap
+	vinylTurners     map[vinylTurnerKey]*vinylTurner
 	lyrics           lyricDocument
 	lyricsPath       string
 	lyricsBusy       bool
@@ -467,6 +474,8 @@ func (a *app) play(path string) {
 	a.prefs.Playing = true
 	a.status = audio.Status{Path: path}
 	a.seek = 0
+	// Starting a song, the same one too as it repeats, is not a rewind.
+	a.vinylPath = ""
 	a.updatePulse()
 	if a.songScreen {
 		a.loadLyrics(false)

@@ -6,7 +6,7 @@ tool github.com/egoist/mygo/cmd/mygo
 
 require (
 	github.com/ebitengine/oto/v3 v3.5.1
-	github.com/egoist/mygo v0.7.1
+	github.com/egoist/mygo v0.8.3
 	github.com/go-text/typesetting v0.3.5
 	github.com/gopxl/beep/v2 v2.1.1
 	github.com/mewkiz/flac v1.0.12

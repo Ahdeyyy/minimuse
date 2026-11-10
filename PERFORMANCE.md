@@ -59,3 +59,19 @@ $env:MINIMUSE_AUDIO_SOAK_SECONDS='30'
 go test -run TestRealDeviceLifecycle -count=1 -v ./internal/audio
 Remove-Item Env:MINIMUSE_AUDIO_INTEGRATION, Env:MINIMUSE_AUDIO_SOAK_SECONDS
 ```
+
+## Update — 10 November 2026: turning record and GPU rendering
+
+The compact player and Playing now screen show the cover as a record that turns with playback. It is drawn from a `Draw` callback that asks for 30 frames a second (`Painter.AnimationFrameRate`), so frames between playback samples repaint only the record without building the view. The grooves, sheen and spindle hole are one cached overlay bitmap per size bucket.
+
+Continuous frames change the renderer trade-off, so MiniMuse no longer forces `MYGO_GPU=0`. Measured in the real window on the machine above, with a looping fixture track muted and 3-second samples (approximate):
+
+| Renderer | Library CPU | Playing now CPU | Private memory |
+| --- | ---: | ---: | ---: |
+| Before, in memory (old default) | 5–8% | ~5% | ~66 MB |
+| After, in memory (`MYGO_GPU=0`) | ~14% | ~77% | ~66–76 MB |
+| After, GPU (new default) | ~14–18% | ~14% | ~116–132 MB |
+
+On the GPU a record frame takes 1–2 ms and redraws only the record's box. In memory, presenting each frame costs 10–25 ms regardless of how little changed, about half of that in re-rasterizing the song backdrop under the record. The in-memory path still turns the cover by rotating its pixels on the CPU (`vinylTurner`), because the rasterizer's transformed images cost about 1 µs a pixel. With reduced motion requested, the record does not turn.
+
+`BenchmarkPlaybackFrame` now renders up to 20 frames per iteration while the record turns, since `Tester.Frame` settles until nothing asks for another frame. `BenchmarkPlaybackSecond` paces frames as a display does instead. Tester rendering is always in memory, so neither measures the GPU path.

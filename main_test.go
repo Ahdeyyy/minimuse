@@ -105,6 +105,8 @@ func TestLibraryUI(t *testing.T) {
 	if !a.theme.Dark {
 		t.Fatal("theme did not change")
 	}
+	// Let the playlist toast expire; it overlaps the dialog's close button.
+	tt.Advance(2 * time.Second)
 	click(t, tt, "Close settings")
 	tt.Frame()
 	tt.Frame()

@@ -51,23 +51,31 @@ func (a *app) view(c *ui.Context) {
 	w, _ := c.Size()
 	ui.Column(c).Fill().Children(func() {
 		a.titlebar(c)
-		ui.Row(c).FillWidth().Grow(1).MinHeight(0).Padding(20, 20, 14, 14).Gap(16).Children(func() {
+		bottom := float32(14)
+		if a.songScreen {
+			// The compact player merges into the song screen, which takes its room.
+			bottom = 20
+		}
+		ui.Row(c).FillWidth().Grow(1).MinHeight(0).Padding(20, 20, bottom, 14).Gap(16).Children(func() {
 			a.sidebar(c)
-			panel := ui.Column(c.Key("main-panel")).Grow(1).MinWidth(0).FillHeight().Background(t.Surface).Radius(12).Border(1, t.Border.Alpha(.65)).Clip()
+			panel := ui.Column(c.Key("main-panel")).Grow(1).MinWidth(0).FillHeight().Background(t.Surface).Radius(12).Border(1, t.Border.Alpha(.65)).Clip().
+				Transition(ui.ElementTransition{Height: true, Animation: &morphMotion})
 			if a.songScreen {
 				a.songBackdrop(c, panel)
 			}
 			panel.Children(func() {
 				if a.songScreen {
-					a.songView(c, w)
+					ui.Column(c.Key("song-screen")).FillWidth().Grow(1).MinHeight(0).Transition(screenFade).Children(func() { a.songView(c, w) })
 				} else {
-					a.libraryView(c, w)
+					ui.Column(c.Key("library-screen")).FillWidth().Grow(1).MinHeight(0).Transition(screenFade).Children(func() { a.libraryView(c, w) })
 				}
 			})
 		})
-		ui.Row(c).FillWidth().Shrink(0).Padding(0, 16, 20, 16).Justify(ui.Center).Children(func() {
-			a.transport(c, min(1200, w-32))
-		})
+		if !a.songScreen {
+			ui.Row(c).FillWidth().Shrink(0).Padding(0, 16, 20, 16).Justify(ui.Center).Children(func() {
+				a.transport(c, min(1200, w-32))
+			})
+		}
 	})
 	a.settingsDialog(c)
 	a.savePlaylistDialog(c)
@@ -299,20 +307,30 @@ func (a *app) emptyView(c *ui.Context) {
 func (a *app) transport(c *ui.Context, width float32) {
 	t := c.Theme()
 	tr := a.current()
-	ui.Row(c.Key("transport")).Label("Playback controls").Width(width).Height(100).Shrink(0).Padding(12, 20).Gap(20).AlignItems(ui.Center).Background(t.Surface).Radius(16).Border(1, t.Border.Alpha(.65)).Shadow(0, 5, 18, 0, ui.RGBA(0, 0, 0, .08)).Children(func() {
+	const height = 100
+	ui.Row(c.Key("transport")).Label("Playback controls").Width(width).Height(height).Shrink(0).Padding(12, 32, 12, 26).Gap(20).AlignItems(ui.Center).Background(t.Surface).Radius(16).Border(1, t.Border.Alpha(.65)).Shadow(0, 5, 18, 0, ui.RGBA(0, 0, 0, .08)).Transition(transportFly).Children(func() {
 		b := ui.Button(c, "").Label("Open song screen").Tooltip("Open currently playing song · Ctrl+L").Width(min(280, max(184, width*.25))).Shrink(0).Padding(0).Gap(12).AlignItems(ui.Center).Background(ui.Transparent).Border(0, ui.Transparent).Disabled(tr == nil)
 		b.Children(func() {
-			ui.Image(c, a.coverFor(tr)).Size(46, 46).Radius(7).Clip().Shrink(0)
+			a.vinyl(c, tr, 56, "Compact album art")
 			ui.Column(c).Width(0).Grow(1).MinWidth(0).Gap(6).Children(func() {
 				title, artist := "Nothing playing", ""
 				if tr != nil {
 					title, artist = tr.Title, tr.Artist
 				}
-				ui.Text(c, title).FontSize(12).Bold().FillWidth().SingleLine().Tooltip(title)
-				ui.Text(c, artist).FontSize(10).TextColor(t.TextMuted).FillWidth().SingleLine().Tooltip(artist)
+				ui.Text(c, title).FontSize(12).Bold().FillWidth().SingleLine().Tooltip(title).Transition(titleFly).ContentTransition(textMorph)
+				ui.Text(c, artist).FontSize(10).TextColor(t.TextMuted).FillWidth().SingleLine().Tooltip(artist).Transition(artistFly).ContentTransition(textMorph)
 			})
 		})
 		b.OnClick(a.openSong)
+		a.transportControls(c)
+	})
+}
+
+// transportControls are shared by the compact player and the song screen.
+// They fly as one group of their own, so both copies lay out alike on the
+// way instead of crossfading two different arrangements.
+func (a *app) transportControls(c *ui.Context) {
+	ui.Row(c.Key("transport-controls")).Grow(1).MinWidth(0).Gap(20).AlignItems(ui.Center).Transition(controlsFly).Children(func() {
 		ui.Column(c).Grow(1).MinWidth(0).Gap(7).Children(func() {
 			ui.Row(c).FillWidth().Justify(ui.Center).Gap(10).AlignItems(ui.Center).Children(func() { a.playbackButtons(c) })
 			a.seekControl(c)

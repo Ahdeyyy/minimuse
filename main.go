@@ -30,12 +30,10 @@ func main() {
 	startPlaying := flag.Bool("play", false, "play the saved current song on startup")
 	cpuProfile := flag.String("cpuprofile", "", "write a Go CPU profile until exit")
 	flag.Parse()
-	// A mostly static player needs no persistent graphics device. Software
-	// rendering roughly halves this app's working set on the test machine.
-	// Honor an explicit MYGO_GPU=1 for users who prefer GPU rendering.
-	if os.Getenv("MYGO_GPU") == "" {
-		_ = os.Setenv("MYGO_GPU", "0")
-	}
+	// Draw on the GPU, MyGo's default: the turning record repaints about 30
+	// times a second while music plays, which costs 1–2 ms a frame there
+	// but 10–25 ms drawn in memory. MYGO_GPU=0 still trades that CPU time
+	// for roughly half the working set.
 	if !mygo.App.RequestSingleInstanceLock() {
 		return
 	}

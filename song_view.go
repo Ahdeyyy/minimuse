@@ -197,6 +197,7 @@ func (a *app) songView(c *ui.Context, width float32) {
 			ui.Text(c, "Choose a song to start listening").FontSize(18).Bold()
 			textButton(c, "back", "Browse music").OnClick(func() { a.songScreen = false; a.updatePulse() })
 		})
+		a.dockedTransport(c)
 		return
 	}
 	_, height := c.Size()
@@ -204,10 +205,10 @@ func (a *app) songView(c *ui.Context, width float32) {
 	ui.Row(c).FillWidth().Grow(1).MinHeight(0).Padding(4, 24, 24, 24).Gap(28).Children(func() {
 		ui.Scroll(c).Width(artSize+16).Padding(0, 16, 0, 0).FillHeight().Children(func() {
 			ui.Column(c).FillWidth().Gap(16).Children(func() {
-				ui.Image(c, a.coverFor(tr)).Size(artSize, artSize).Radius(12).Clip().Label("Album cover art")
+				a.vinyl(c, tr, artSize, "Album cover art").Shadow(0, 10, 28, 0, ui.RGBA(0, 0, 0, .28))
 				ui.Column(c).FillWidth().Gap(8).Children(func() {
-					ui.Text(c, tr.Title).FontSize(23).Bold().FillWidth().LineHeight(1.25)
-					ui.Text(c, tr.Artist).FontSize(13).TextColor(t.TextMuted).FillWidth()
+					ui.Text(c, tr.Title).FontSize(23).Bold().FillWidth().LineHeight(1.25).Transition(titleFly).ContentTransition(textMorph)
+					ui.Text(c, tr.Artist).FontSize(13).TextColor(t.TextMuted).FillWidth().Transition(artistFly).ContentTransition(textMorph)
 					ui.Text(c, tr.Album).FontSize(12).TextColor(t.TextMuted).FillWidth()
 				})
 				quality := codec(tr.Path)
@@ -218,6 +219,18 @@ func (a *app) songView(c *ui.Context, width float32) {
 			})
 		})
 		ui.Column(c.Key("lyrics-panel")).Width(0).Grow(1).MinWidth(0).FillHeight().Gap(12).Children(func() { a.lyricsView(c) })
+	})
+	a.dockedTransport(c)
+}
+
+// dockedTransport is the compact player merged into the song screen. It
+// shares the compact player's identity, so opening the screen flies it in.
+func (a *app) dockedTransport(c *ui.Context) {
+	const height = 84
+	ui.Row(c).FillWidth().Shrink(0).Padding(0, 20, 20, 20).Children(func() {
+		ui.Row(c.Key("transport")).Label("Playback controls").FillWidth().Height(height).Padding(10, 32).Gap(20).AlignItems(ui.Center).
+			Background(ui.Transparent).Radius(16).Border(0, ui.Transparent).Transition(transportFly).
+			Children(func() { a.transportControls(c) })
 	})
 }
 
